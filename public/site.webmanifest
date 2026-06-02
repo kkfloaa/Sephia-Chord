@@ -1,7 +1,7 @@
 {
   "name": "Sephia Chord",
   "short_name": "Sephia",
-  "description": "A mobile-first personal planner for schedules, tasks, routines, and emotion records.",
+  "description": "A mobile-first personal planner for schedules, tasks, routines, and challenge records.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f0c09",

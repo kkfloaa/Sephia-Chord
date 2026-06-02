@@ -74,6 +74,12 @@ async function listItems(req, res) {
             select: {
               equals: "루틴"
             }
+          },
+          {
+            property: "유형",
+            select: {
+              equals: "감정"
+            }
           }
         ]
       };
@@ -111,7 +117,7 @@ async function createItem(req, res) {
     return;
   }
 
-  if (body.type === "감정" && body.date) {
+  if (body.type === "감정" && body.date && !isChallengePayload(body)) {
     await upsertEmotionItem(res, body, schema, titleProperty);
     return;
   }
@@ -127,6 +133,15 @@ async function createItem(req, res) {
   });
 
   json(res, 201, { item: normalizeItem(payload, schema, titleProperty) });
+}
+
+function isChallengePayload(body) {
+  if (!body || body.type !== "감정" || !body.note) return false;
+  try {
+    return JSON.parse(body.note).kind === "challenge";
+  } catch {
+    return false;
+  }
 }
 
 async function upsertEmotionItem(res, body, schema, titleProperty) {
@@ -253,7 +268,7 @@ async function trashItem(req, res) {
 }
 
 function sanitizePayload(input, isPatch) {
-  const allowedTypes = new Set(["일정", "할일", "루틴", "루틴기록", "감정", "기분"]);
+  const allowedTypes = new Set(["일정", "할일", "루틴", "루틴기록", "감정", "기분", "챌린지"]);
   const allowedStatuses = new Set(["예정", "진행", "완료", "보류", "취소"]);
   const allowedDays = new Set(["월", "화", "수", "목", "금", "토", "일"]);
   const allowedEmotions = new Set([
@@ -311,6 +326,10 @@ function sanitizePayload(input, isPatch) {
     }
     if (body.type === "루틴기록") {
       body.status = body.completed ? "완료" : "예정";
+    }
+    if (body.type === "챌린지") {
+      body.status = "완료";
+      body.completed = true;
     }
     if (body.type === "기분") {
       body.type = "감정";

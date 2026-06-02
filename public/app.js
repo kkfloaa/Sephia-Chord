@@ -17,19 +17,35 @@ const state = {
   calendarSelection: null,
   selectedCalendarSchedule: null,
   calendarScheduleResize: null,
+  calendarScheduleDrag: null,
+  calendarZoom: 1,
+  calendarZoomGesture: null,
+  calendarZoomPulse: false,
+  calendarZoomPulseTimer: null,
   suppressCalendarScheduleClick: false,
   suppressCalendarClick: false,
   lastCalendarClick: null,
   selectedEmotionDate: null,
+  selectedChallengeLayer: null,
+  challengeAnalysis: null,
+  challengeRenderToken: 0,
   lastEmotionClick: null,
   emotionClickTimer: null,
   suppressEmotionDblclick: false,
   picker: null,
   emotionSaving: false,
+  challengeSaving: false,
   pinSubmitting: false
 };
 
 const PIN_LENGTH = 4;
+const CALENDAR_ZOOM_DEFAULT = 1;
+const CALENDAR_ZOOM_MIN = 0.76;
+const CALENDAR_ZOOM_MAX = 1.48;
+const CALENDAR_ZOOM_STEP = 0.12;
+const CHALLENGE_CANVAS_WIDTH = 720;
+const CHALLENGE_WHITE_THRESHOLD = 250;
+const CHALLENGE_MIN_LAYER_AREA = 400;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const ROUTINE_DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const EMOTION_GROUPS = [
@@ -65,6 +81,28 @@ const EMOTION_GROUPS = [
   }
 ];
 const EMOTIONS = EMOTION_GROUPS.flatMap((group) => group.options);
+const CHALLENGE_LEVELS = [
+  { id: "8", image: "/assets/challenge/8.png", layerCount: 26 },
+  { id: "10", image: "/assets/challenge/10.png", layerCount: 39 },
+  { id: "7", image: "/assets/challenge/7.png", layerCount: 40 },
+  { id: "13", image: "/assets/challenge/13.png", layerCount: 48 },
+  { id: "11", image: "/assets/challenge/11.png", layerCount: 51 },
+  { id: "5", image: "/assets/challenge/5.png", layerCount: 55 },
+  { id: "3", image: "/assets/challenge/3.png", layerCount: 61 },
+  { id: "4", image: "/assets/challenge/4.png", layerCount: 66 },
+  { id: "12", image: "/assets/challenge/12.png", layerCount: 70 },
+  { id: "6", image: "/assets/challenge/6.png", layerCount: 72 },
+  { id: "1", image: "/assets/challenge/1.png", layerCount: 74 },
+  { id: "2", image: "/assets/challenge/2.png", layerCount: 97 },
+  { id: "9", image: "/assets/challenge/9.png", layerCount: 110 }
+];
+const CHALLENGE_COLORS = Array.from({ length: 64 }, (_, index) => {
+  const hue = Math.round((index * 137.508) % 360);
+  const saturation = 48 + (index % 4) * 8;
+  const lightness = 44 + (Math.floor(index / 4) % 4) * 7;
+  return hslToHex(hue, saturation, lightness);
+});
+const challengeImageCache = new Map();
 
 const els = {
   allDayField: document.querySelector("#allDayField"),
@@ -198,6 +236,11 @@ function bindEvents() {
     if (!action) return;
 
     const id = action.dataset.id;
+    if (state.suppressCalendarClick && action.dataset.action === "select-date") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (action.dataset.action === "add") openItemDialog(action.dataset.type);
     if (action.dataset.action === "edit") openItemDialog(null, findItem(id));
     if (action.dataset.action === "select-timeline-item") {
@@ -227,6 +270,10 @@ function bindEvents() {
       event.stopPropagation();
       markEmotionSelection(action.dataset.emotion);
       await saveEmotion(action.dataset.emotion);
+    }
+    if (action.dataset.action === "open-challenge-gallery") {
+      event.stopPropagation();
+      openChallengeGallery();
     }
     if (action.dataset.action === "save-emotion-comment") {
       event.stopPropagation();
@@ -282,6 +329,19 @@ function bindEvents() {
       state.visibleMonth = addMonths(state.visibleMonth, 1);
       await loadItems();
     }
+    if (action.dataset.action === "calendar-zoom-out") {
+      adjustCalendarZoom(-CALENDAR_ZOOM_STEP);
+      return;
+    }
+    if (action.dataset.action === "calendar-zoom-in") {
+      adjustCalendarZoom(CALENDAR_ZOOM_STEP);
+      return;
+    }
+    if (action.dataset.action === "calendar-zoom-reset") {
+      resetCalendarZoom(true);
+      render();
+      return;
+    }
   });
 
   document.body.addEventListener("dblclick", async (event) => {
@@ -336,6 +396,14 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarScheduleResize);
   document.body.addEventListener("pointerup", finishCalendarScheduleResize);
   document.body.addEventListener("pointercancel", cancelCalendarScheduleResize);
+  document.body.addEventListener("pointerdown", startCalendarScheduleDrag);
+  document.body.addEventListener("pointermove", moveCalendarScheduleDrag);
+  document.body.addEventListener("pointerup", finishCalendarScheduleDrag);
+  document.body.addEventListener("pointercancel", cancelCalendarScheduleDrag);
+  document.body.addEventListener("pointerdown", startCalendarZoomGesture);
+  document.body.addEventListener("pointermove", moveCalendarZoomGesture);
+  document.body.addEventListener("pointerup", finishCalendarZoomGesture);
+  document.body.addEventListener("pointercancel", finishCalendarZoomGesture);
   document.body.addEventListener("pointerdown", startCalendarSelection);
   document.body.addEventListener("pointermove", moveCalendarSelection);
   document.body.addEventListener("pointerup", finishCalendarSelection);
@@ -500,13 +568,7 @@ function renderTabs() {
 }
 
 function renderToday() {
-  const schedules = itemsFor("일정", state.selectedDate).sort(byStartTime);
-  const todos = itemsFor("할일", state.selectedDate).sort(byDoneThenTitle);
-  const timedTodos = todos
-    .filter((item) => item.startTime)
-    .map(todoTimelineItem);
-  const timedRoutines = activeRoutines(state.selectedDate).map(routineTimelineItem);
-  const timelineItems = [...schedules, ...timedTodos, ...timedRoutines].sort(byStartTime);
+  const timelineItems = timelineItemsForDate(state.selectedDate);
 
   els.todayTab.innerHTML = `
     <section class="section">
@@ -516,6 +578,16 @@ function renderToday() {
       <div class="timeline" data-timeline-context="today">${renderTimeline(timelineItems, "today")}</div>
     </section>
   `;
+}
+
+function timelineItemsForDate(date) {
+  const schedules = itemsFor("일정", date).sort(byStartTime);
+  const todos = itemsFor("할일", date).sort(byDoneThenTitle);
+  const timedTodos = todos
+    .filter((item) => item.startTime)
+    .map(todoTimelineItem);
+  const timedRoutines = activeRoutines(date).map(routineTimelineItem);
+  return [...schedules, ...timedTodos, ...timedRoutines].sort(byStartTime);
 }
 
 function renderTimeline(schedules, context = "today") {
@@ -660,33 +732,71 @@ function timelineBlocksOverlap(left, right) {
 function renderCalendar() {
   const days = calendarDays(state.visibleMonth);
   const monthLabel = state.visibleMonth.slice(0, 7);
+  const scheduleRows = calendarScheduleRows(days);
+  const scheduleRowCount = calendarScheduleDisplayRowCount(days, scheduleRows);
+  const calendarClasses = [
+    "calendar-grid",
+    "schedule-calendar",
+    state.calendarZoomPulse ? "zoom-default-hit" : ""
+  ].filter(Boolean).join(" ");
 
   els.calendarTab.innerHTML = `
     <section class="section">
       <div class="month-header">
         <button type="button" data-action="month-prev">‹</button>
         <h2>${monthLabel}</h2>
-        <button type="button" data-action="month-next">›</button>
+        <div class="calendar-header-actions">
+          <button type="button" class="calendar-zoom-button" data-action="calendar-zoom-out" aria-label="캘린더 축소">−</button>
+          <button type="button" class="calendar-zoom-reset ${isDefaultCalendarZoom() ? "is-default" : ""}" data-action="calendar-zoom-reset" aria-label="기본 크기로 복귀"></button>
+          <button type="button" class="calendar-zoom-button" data-action="calendar-zoom-in" aria-label="캘린더 확대">+</button>
+          <button type="button" data-action="month-next">›</button>
+        </div>
       </div>
-      <div class="calendar-grid schedule-calendar">
+      <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount)}">
         ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
-        ${days.map(renderCalendarDay).join("")}
+        ${days.map((day) => renderCalendarDay(day, scheduleRows)).join("")}
       </div>
     </section>
   `;
 }
 
+function calendarZoomStyle(scheduleRowCount) {
+  const zoom = state.calendarZoom;
+  const compact = window.matchMedia?.("(max-width: 430px)").matches;
+  const base = compact
+    ? { top: 23, row: 14, chip: 12, font: 8, gap: 4 }
+    : { top: 24, row: 15, chip: 13, font: 9, gap: 5 };
+  const rowHeight = roundCalendarZoomValue(base.row * zoom);
+  const dayHeight = roundCalendarZoomValue((base.top + scheduleRowCount * base.row) * zoom);
+  const chipHeight = roundCalendarZoomValue(Math.max(10, base.chip * zoom));
+  const chipFontSize = roundCalendarZoomValue(Math.max(8, base.font * zoom));
+  const gap = roundCalendarZoomValue(Math.max(3, base.gap * zoom));
+
+  return [
+    `--schedule-row-count:${scheduleRowCount}`,
+    `--schedule-row-height:${rowHeight}px`,
+    `--calendar-day-height:${dayHeight}px`,
+    `--schedule-chip-height:${chipHeight}px`,
+    `--schedule-chip-font-size:${chipFontSize}px`,
+    `--calendar-gap:${gap}px`
+  ].join(";");
+}
+
+function roundCalendarZoomValue(value) {
+  return Math.round(value * 10) / 10;
+}
+
 function renderCalendarTimelineDialog() {
-  const selectedSchedules = itemsFor("일정", state.selectedDate).sort(byStartTime);
+  const timelineItems = timelineItemsForDate(state.selectedDate);
   els.calendarTimelineTitle.textContent = humanDate(state.selectedDate);
   els.calendarTimelineContent.innerHTML = `
     <div class="timeline calendar-day-timeline" data-timeline-context="calendar">
-      ${renderTimeline(selectedSchedules, "calendar")}
+      ${renderTimeline(timelineItems, "calendar")}
     </div>
   `;
 }
 
-function renderCalendarDay(day) {
+function renderCalendarDay(day, scheduleRows = {}) {
   const schedules = itemsFor("일정", day.date).sort(byStartTime);
   const isSelected = day.date === state.selectedDate;
   const classes = [
@@ -698,43 +808,471 @@ function renderCalendarDay(day) {
   return `
     <button type="button" class="${classes}" data-action="select-date" data-date="${day.date}">
       <span class="day-number">${Number(day.date.slice(8, 10))}</span>
-      <span class="day-schedules">${renderCalendarScheduleChips(schedules, day.date)}</span>
+      <span class="day-schedules">${renderCalendarScheduleChips(schedules, day.date, scheduleRows)}</span>
     </button>
   `;
 }
 
 function renderEmotionTab() {
+  const progress = challengeProgress();
+  const active = activeChallengeLevel(progress);
+
+  if (!active) {
+    state.selectedChallengeLayer = null;
+    els.emotionTab.innerHTML = `
+      <section class="section">
+        <div class="challenge-panel challenge-cleared">
+        <div class="challenge-summary">
+          <span>챌린지</span>
+          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">갤러리</button>
+        </div>
+        <div class="challenge-complete">모든 레벨 클리어</div>
+        </div>
+      </section>
+    `;
+    return;
+  }
+
+  if (state.selectedChallengeLayer?.levelId !== active.level.id) {
+    state.selectedChallengeLayer = null;
+  }
+
   els.emotionTab.innerHTML = `
     <section class="section">
-      ${renderEmotionCalendar()}
+      <div class="challenge-panel">
+        <div class="challenge-summary">
+          <span class="challenge-level-label">
+            레벨 ${active.index + 1}
+            <span class="challenge-layer-count">(${active.filledCount}/${active.level.layerCount})</span>
+          </span>
+          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">갤러리</button>
+        </div>
+        <div class="challenge-progress-bar" aria-hidden="true">
+          <span style="width:${challengeProgressPercent(active)}%;"></span>
+        </div>
+        <div class="challenge-art">
+          <canvas id="challengeCanvas" class="challenge-canvas" data-level-id="${active.level.id}"></canvas>
+        </div>
+      </div>
     </section>
+  `;
+  queueChallengeCanvasRender(active.level);
+}
+
+function challengeProgressPercent(active) {
+  if (!active || !active.level.layerCount) return 0;
+  return Math.min(100, Math.round((active.filledCount / active.level.layerCount) * 100));
+}
+
+function challengeProgress() {
+  const filledByLevel = new Map(CHALLENGE_LEVELS.map((level) => [level.id, new Map()]));
+  challengeRecords().forEach((record) => {
+    if (!filledByLevel.has(record.levelId)) return;
+    filledByLevel.get(record.levelId).set(record.layer, record);
+  });
+  return { filledByLevel };
+}
+
+function activeChallengeLevel(progress = challengeProgress()) {
+  const index = CHALLENGE_LEVELS.findIndex((level) => {
+    const filled = progress.filledByLevel.get(level.id);
+    return (filled ? filled.size : 0) < level.layerCount;
+  });
+  if (index === -1) return null;
+
+  const level = CHALLENGE_LEVELS[index];
+  const filled = progress.filledByLevel.get(level.id) || new Map();
+  return { index, level, filled, filledCount: filled.size };
+}
+
+function challengeRecords() {
+  return state.items
+    .map(challengeRecordInfo)
+    .filter(Boolean);
+}
+
+function challengeRecordInfo(item) {
+  try {
+    const payload = JSON.parse(item.note || "{}");
+    if (!isChallengeItem(item, payload)) return null;
+    const levelId = String(payload.levelId || "");
+    const layer = Number(payload.layer);
+    if (!levelId || !Number.isInteger(layer) || layer < 0) return null;
+    const color = typeof payload.color === "string" ? payload.color : "";
+    return {
+      item,
+      levelId,
+      layer,
+      palette: color ? challengePaletteFromColor(color) : emotionPalette(item.emotion || item.mood)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isChallengeItem(item, payload = null) {
+  if (!item) return false;
+  if (item.type === "챌린지") return true;
+  return item.type === "감정" && payload && payload.kind === "challenge";
+}
+
+function challengeFillMap(levelId) {
+  return challengeRecords()
+    .filter((record) => record.levelId === levelId && record.palette)
+    .reduce((map, record) => map.set(record.layer, record.palette), new Map());
+}
+
+function challengePaletteFromColor(color) {
+  return {
+    color,
+    border: color,
+    text: "#111111"
+  };
+}
+
+function queueChallengeCanvasRender(level) {
+  const token = ++state.challengeRenderToken;
+  window.requestAnimationFrame(() => {
+    renderChallengeCanvas(level, token);
+  });
+}
+
+async function renderChallengeCanvas(level, token = state.challengeRenderToken) {
+  const canvas = document.querySelector("#challengeCanvas");
+  if (!canvas || !level || canvas.dataset.levelId !== level.id) return;
+
+  try {
+    const analysis = await getChallengeAnalysis(level);
+    if (token !== state.challengeRenderToken || canvas.dataset.levelId !== level.id) return;
+    drawChallengeCanvas(canvas, level, analysis);
+  } catch (error) {
+    setStatus(error.message || "챌린지 그림을 불러오지 못했습니다.");
+  }
+}
+
+async function getChallengeAnalysis(level) {
+  if (state.challengeAnalysis?.levelId === level.id) return state.challengeAnalysis;
+
+  const image = await loadChallengeImage(level);
+  const width = CHALLENGE_CANVAS_WIDTH;
+  const height = Math.round((image.naturalHeight / image.naturalWidth) * width);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#fffaf4";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+
+  const imageData = context.getImageData(0, 0, width, height);
+  const layerData = detectChallengeLayers(imageData, width, height);
+  state.challengeAnalysis = {
+    levelId: level.id,
+    image,
+    width,
+    height,
+    ...layerData
+  };
+
+  return state.challengeAnalysis;
+}
+
+function loadChallengeImage(level) {
+  if (challengeImageCache.has(level.id)) return challengeImageCache.get(level.id);
+
+  const promise = new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("챌린지 이미지를 불러오지 못했습니다."));
+    image.src = level.image;
+  });
+
+  challengeImageCache.set(level.id, promise);
+  return promise;
+}
+
+function detectChallengeLayers(imageData, width, height) {
+  const total = width * height;
+  const data = imageData.data;
+  const white = new Uint8Array(total);
+  const visited = new Uint8Array(total);
+  const componentMap = new Int32Array(total);
+  const queue = new Int32Array(total);
+  const components = [];
+  componentMap.fill(-1);
+
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    if (
+      data[offset] >= CHALLENGE_WHITE_THRESHOLD &&
+      data[offset + 1] >= CHALLENGE_WHITE_THRESHOLD &&
+      data[offset + 2] >= CHALLENGE_WHITE_THRESHOLD
+    ) {
+      white[index] = 1;
+    }
+  }
+
+  const enqueueBorder = (index, queueState) => {
+    if (!white[index] || visited[index]) return queueState;
+    visited[index] = 1;
+    queue[queueState.tail] = index;
+    queueState.tail += 1;
+    return queueState;
+  };
+  let borderQueue = { head: 0, tail: 0 };
+  for (let x = 0; x < width; x += 1) {
+    borderQueue = enqueueBorder(x, borderQueue);
+    borderQueue = enqueueBorder((height - 1) * width + x, borderQueue);
+  }
+  for (let y = 0; y < height; y += 1) {
+    borderQueue = enqueueBorder(y * width, borderQueue);
+    borderQueue = enqueueBorder(y * width + width - 1, borderQueue);
+  }
+
+  while (borderQueue.head < borderQueue.tail) {
+    const index = queue[borderQueue.head];
+    borderQueue.head += 1;
+    enqueueChallengeNeighbors(index, width, height, white, visited, queue, borderQueue);
+  }
+
+  for (let index = 0; index < total; index += 1) {
+    if (!white[index] || visited[index]) continue;
+
+    const pixels = [];
+    let head = 0;
+    let tail = 0;
+    visited[index] = 1;
+    queue[tail] = index;
+    tail += 1;
+
+    while (head < tail) {
+      const current = queue[head];
+      head += 1;
+      pixels.push(current);
+      const queueState = { head, tail };
+      enqueueChallengeNeighbors(current, width, height, white, visited, queue, queueState);
+      head = queueState.head;
+      tail = queueState.tail;
+    }
+
+    if (pixels.length < CHALLENGE_MIN_LAYER_AREA) continue;
+
+    const componentIndex = components.length;
+    pixels.forEach((pixelIndex) => {
+      componentMap[pixelIndex] = componentIndex;
+    });
+    components.push({ area: pixels.length });
+  }
+
+  return { componentMap, components };
+}
+
+function enqueueChallengeNeighbors(index, width, height, white, visited, queue, queueState) {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  const candidates = [];
+  if (x > 0) candidates.push(index - 1);
+  if (x < width - 1) candidates.push(index + 1);
+  if (y > 0) candidates.push(index - width);
+  if (y < height - 1) candidates.push(index + width);
+
+  candidates.forEach((candidate) => {
+    if (!white[candidate] || visited[candidate]) return;
+    visited[candidate] = 1;
+    queue[queueState.tail] = candidate;
+    queueState.tail += 1;
+  });
+}
+
+function drawChallengeCanvas(canvas, level, analysis, options = {}) {
+  canvas.width = analysis.width;
+  canvas.height = analysis.height;
+  const context = canvas.getContext("2d");
+  const fills = options.fills || challengeFillMap(level.id);
+  const selectedLayer = options.selectedLayer !== undefined
+    ? options.selectedLayer
+    : state.selectedChallengeLayer?.levelId === level.id
+      ? state.selectedChallengeLayer.layer
+      : -1;
+  const overlay = context.createImageData(analysis.width, analysis.height);
+  const overlayData = overlay.data;
+
+  for (let index = 0; index < analysis.componentMap.length; index += 1) {
+    const component = analysis.componentMap[index];
+    if (component < 0) continue;
+
+    const palette = fills.get(component);
+    const rgb = palette ? hexToRgb(palette.color) : (component === selectedLayer ? hexToRgb("#c47b3c") : null);
+    if (!rgb) continue;
+
+    const offset = index * 4;
+    overlayData[offset] = rgb.r;
+    overlayData[offset + 1] = rgb.g;
+    overlayData[offset + 2] = rgb.b;
+    overlayData[offset + 3] = palette ? 230 : 96;
+  }
+
+  context.fillStyle = "#fffaf4";
+  context.fillRect(0, 0, analysis.width, analysis.height);
+  context.putImageData(overlay, 0, 0);
+  context.globalCompositeOperation = "multiply";
+  context.drawImage(analysis.image, 0, 0, analysis.width, analysis.height);
+  context.globalCompositeOperation = "source-over";
+}
+
+async function awardChallengeFill() {
+  if (state.challengeSaving) return "";
+
+  const active = activeChallengeLevel();
+  if (!active) return "";
+
+  const filled = challengeFillMap(active.level.id);
+  const candidates = Array.from({ length: active.level.layerCount }, (_, index) => index)
+    .filter((layer) => !filled.has(layer));
+  if (!candidates.length) return "";
+
+  const layer = randomChoice(candidates);
+  const color = randomChoice(CHALLENGE_COLORS);
+  if (!color) {
+    return "챌린지 색상을 선택하지 못했습니다.";
+  }
+
+  const nextFilledCount = active.filledCount + 1;
+  const cleared = nextFilledCount >= active.level.layerCount;
+  state.challengeSaving = true;
+
+  try {
+    await api("/api/items", {
+      method: "POST",
+      body: {
+        title: `챌린지 레벨 ${active.index + 1} 레이어 ${layer + 1}`,
+        type: "감정",
+        date: todayString(),
+        completed: true,
+        status: "완료",
+        note: JSON.stringify({
+          kind: "challenge",
+          levelId: active.level.id,
+          layer,
+          color
+        })
+      }
+    });
+
+    state.selectedChallengeLayer = null;
+    state.challengeAnalysis = null;
+    return cleared ? "레벨 클리어. 다음 레벨로 이동했습니다." : "챌린지 기록을 저장했습니다.";
+  } catch (error) {
+    return error.message || "챌린지 기록을 저장하지 못했습니다.";
+  } finally {
+    state.challengeSaving = false;
+  }
+}
+
+function randomChoice(values) {
+  return values[Math.floor(Math.random() * values.length)];
+}
+
+function hexToRgb(hex) {
+  const normalized = String(hex || "").replace("#", "");
+  const value = parseInt(normalized.length === 3
+    ? normalized.split("").map((char) => `${char}${char}`).join("")
+    : normalized, 16);
+
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255
+  };
+}
+
+function hslToHex(hue, saturation, lightness) {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+  const m = l - c / 2;
+  const [r, g, b] = hue < 60 ? [c, x, 0]
+    : hue < 120 ? [x, c, 0]
+      : hue < 180 ? [0, c, x]
+        : hue < 240 ? [0, x, c]
+          : hue < 300 ? [x, 0, c]
+            : [c, 0, x];
+
+  return [r, g, b]
+    .map((value) => Math.round((value + m) * 255).toString(16).padStart(2, "0"))
+    .reduce((hex, part) => `${hex}${part}`, "#");
+}
+
+function openChallengeGallery() {
+  const progress = challengeProgress();
+  const active = activeChallengeLevel(progress);
+  const activeIndex = active ? active.index : CHALLENGE_LEVELS.length;
+
+  els.emotionDialogTitle.textContent = "갤러리";
+  els.emotionDialogContent.innerHTML = renderChallengeGallery(progress, activeIndex);
+  if (!els.emotionDialog.open) {
+    els.emotionDialog.showModal();
+  }
+  queueChallengeGalleryRender(activeIndex);
+}
+
+function renderChallengeGallery(progress, activeIndex) {
+  return `
+    <div class="challenge-gallery">
+      ${CHALLENGE_LEVELS.map((level, index) => {
+        const filled = progress.filledByLevel.get(level.id);
+        const filledCount = filled ? filled.size : 0;
+        const unlocked = index <= activeIndex;
+        const cleared = filledCount >= level.layerCount;
+
+        if (!unlocked) {
+          return `
+            <div class="challenge-gallery-card locked">
+              <div class="challenge-gallery-mask">?</div>
+              <span>레벨 ${index + 1}</span>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="challenge-gallery-card ${cleared ? "cleared" : "current"}">
+            <canvas class="challenge-gallery-canvas" data-gallery-level-id="${level.id}"></canvas>
+            <div class="challenge-gallery-meta">
+              <span>레벨 ${index + 1}</span>
+              <strong>${cleared ? "CLEAR" : `${filledCount}/${level.layerCount}`}</strong>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
   `;
 }
 
-function renderCalendarScheduleChips(schedules, date) {
+function queueChallengeGalleryRender(activeIndex) {
+  window.requestAnimationFrame(() => {
+    renderChallengeGalleryCanvases(activeIndex);
+  });
+}
+
+async function renderChallengeGalleryCanvases(activeIndex) {
+  const canvases = [...document.querySelectorAll(".challenge-gallery-canvas")];
+  await Promise.all(canvases.map(async (canvas) => {
+    const level = CHALLENGE_LEVELS.find((item) => item.id === canvas.dataset.galleryLevelId);
+    const index = CHALLENGE_LEVELS.findIndex((item) => item.id === level?.id);
+    if (!level || index > activeIndex) return;
+
+    const analysis = await getChallengeAnalysis(level);
+    drawChallengeCanvas(canvas, level, analysis, { selectedLayer: -1 });
+  }));
+}
+
+function renderCalendarScheduleChips(schedules, date, scheduleRows = {}) {
   if (!schedules.length) return "";
 
-  const decorated = schedules.map((schedule) => {
-    const rangeClass = calendarScheduleRangeClass(schedule, date);
-    const rangeTokens = rangeClass.split(/\s+/);
-    const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
-    const title = String(schedule.title || "").trim() || "제목 없음";
-    const selected = selectedCalendarScheduleMatches(schedule.id);
+  const decorated = calendarDecoratedSchedules(schedules, date, scheduleRows);
 
-    return { rangeClass, schedule, showTitle, title, selected };
-  });
-
-  const visibleSchedules = decorated.slice(0, 2);
-  if (!visibleSchedules.some((schedule) => schedule.showTitle)) {
-    const titleSchedule = decorated.slice(2).find((schedule) => schedule.showTitle);
-    if (titleSchedule) visibleSchedules[visibleSchedules.length - 1] = titleSchedule;
-  }
-  if (!visibleSchedules.some((schedule) => schedule.selected)) {
-    const selectedSchedule = decorated.slice(2).find((schedule) => schedule.selected);
-    if (selectedSchedule) visibleSchedules[visibleSchedules.length - 1] = selectedSchedule;
-  }
-
-  const visible = visibleSchedules.map(({ rangeClass, schedule, selected, showTitle, title }) => {
+  return decorated.map(({ rangeClass, row, schedule, selected, showTitle, title }) => {
     const label = showTitle ? escapeHtml(title) : "&nbsp;";
     const rangeTokens = rangeClass.split(/\s+/);
     const canResizeStart = selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-start"));
@@ -753,6 +1291,7 @@ function renderCalendarScheduleChips(schedules, date) {
         data-action="select-calendar-schedule"
         data-id="${schedule.id}"
         data-date="${date}"
+        style="--schedule-row:${row};"
       >
         ${canResizeStart ? '<span class="calendar-resize-handle resize-left" data-calendar-resize-edge="start" aria-hidden="true"></span>' : ""}
         ${label}
@@ -760,10 +1299,65 @@ function renderCalendarScheduleChips(schedules, date) {
       </span>
     `;
   }).join("");
-  const extraCount = schedules.length - 2;
-  const more = extraCount > 0 ? `<span class="schedule-more">+${extraCount}</span>` : "";
+}
 
-  return `${visible}${more}`;
+function calendarDecoratedSchedules(schedules, date, scheduleRows = {}) {
+  return schedules.map((schedule) => {
+    const rangeClass = calendarScheduleRangeClass(schedule, date);
+    const rangeTokens = rangeClass.split(/\s+/);
+    const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
+    const title = String(schedule.title || "").trim() || "제목 없음";
+    const selected = selectedCalendarScheduleMatches(schedule.id);
+    const row = scheduleRows[schedule.id] || 0;
+
+    return { rangeClass, row, schedule, showTitle, title, selected };
+  });
+}
+
+function calendarScheduleDisplayRowCount(days, scheduleRows = {}) {
+  const counts = days.map((day) => {
+    const schedules = itemsFor("일정", day.date).sort(byStartTime);
+    if (!schedules.length) return 2;
+
+    const decorated = calendarDecoratedSchedules(schedules, day.date, scheduleRows);
+    return Math.max(2, ...decorated.map((schedule) => schedule.row + 1));
+  });
+
+  return Math.max(2, ...counts);
+}
+
+function calendarScheduleRows(days) {
+  const rangeStart = days[0]?.date;
+  const rangeEnd = days[days.length - 1]?.date;
+  if (!rangeStart || !rangeEnd) return {};
+
+  const schedules = state.items
+    .filter((item) => item.type === "일정" && isItemRangeOnCalendar(item, rangeStart, rangeEnd))
+    .sort((left, right) => {
+      const leftRange = selectedDateRange(left.date, left.endDate || left.date);
+      const rightRange = selectedDateRange(right.date, right.endDate || right.date);
+      return leftRange.startDate.localeCompare(rightRange.startDate) ||
+        rightRange.endDate.localeCompare(leftRange.endDate) ||
+        String(left.title || "").localeCompare(String(right.title || ""), "ko");
+    });
+  const rows = {};
+  const rowEndDates = [];
+
+  schedules.forEach((schedule) => {
+    const range = selectedDateRange(schedule.date, schedule.endDate || schedule.date);
+    const row = rowEndDates.findIndex((endDate) => endDate < range.startDate);
+    const rowIndex = row === -1 ? rowEndDates.length : row;
+    rowEndDates[rowIndex] = range.endDate;
+    rows[schedule.id] = rowIndex;
+  });
+
+  return rows;
+}
+
+function isItemRangeOnCalendar(item, startDate, endDate) {
+  if (!item.date) return false;
+  const range = selectedDateRange(item.date, item.endDate || item.date);
+  return range.startDate <= endDate && range.endDate >= startDate;
 }
 
 function calendarScheduleRangeClass(schedule, date) {
@@ -1327,12 +1921,18 @@ async function toggleRoutine(id) {
     });
   }
 
+  const challengeMessage = completed ? await awardChallengeFill() : "";
   await loadItems();
+  if (challengeMessage) setStatus(challengeMessage);
 }
 
 function startTimeSelection(event) {
   const slot = event.target.closest("[data-time-slot]");
-  if (!slot || event.target.closest(".slot-time") || event.target.closest("button, input, textarea, select")) return;
+  if (
+    !slot ||
+    event.target.closest(".slot-time") ||
+    event.target.closest("button, input, textarea, select")
+  ) return;
   const context = timelineContextFromSlot(slot);
 
   state.timeSelection = {
@@ -1747,6 +2347,207 @@ function cancelCalendarScheduleResize() {
   clearCalendarScheduleResizeState(true);
 }
 
+function startCalendarScheduleDrag(event) {
+  const chip = event.target.closest(".schedule-chip[data-action='select-calendar-schedule']");
+  if (
+    !chip ||
+    event.target.closest("[data-calendar-resize-edge]") ||
+    !selectedCalendarScheduleMatches(chip.dataset.id)
+  ) return;
+
+  const item = findItem(chip.dataset.id);
+  if (!item || item.type !== "일정") return;
+
+  const range = selectedDateRange(item.date, item.endDate || item.date);
+  state.calendarScheduleDrag = {
+    pointerId: event.pointerId,
+    id: item.id,
+    element: chip,
+    grabbedDate: chip.dataset.date || range.startDate,
+    originalStartDate: range.startDate,
+    originalEndDate: range.endDate,
+    targetStartDate: range.startDate,
+    targetEndDate: range.endDate,
+    startX: event.clientX,
+    startY: event.clientY,
+    moved: false
+  };
+  chip.setPointerCapture?.(event.pointerId);
+}
+
+function moveCalendarScheduleDrag(event) {
+  if (!state.calendarScheduleDrag || state.calendarScheduleDrag.pointerId !== event.pointerId) return;
+
+  const distance = Math.abs(event.clientX - state.calendarScheduleDrag.startX) + Math.abs(event.clientY - state.calendarScheduleDrag.startY);
+  if (distance <= 8 && !state.calendarScheduleDrag.moved) return;
+
+  state.calendarScheduleDrag.moved = true;
+  state.calendarScheduleDrag.element.classList.add("dragging");
+  updateCalendarScheduleDragTarget(event);
+  markCalendarScheduleDragDates();
+  event.preventDefault();
+}
+
+async function finishCalendarScheduleDrag(event) {
+  if (!state.calendarScheduleDrag || state.calendarScheduleDrag.pointerId !== event.pointerId) return;
+
+  const drag = state.calendarScheduleDrag;
+  const moved = drag.moved;
+  const startDate = drag.targetStartDate;
+  const endDate = drag.targetEndDate;
+  clearCalendarScheduleDragState();
+
+  if (!moved) return;
+
+  state.suppressCalendarScheduleClick = true;
+  window.setTimeout(() => {
+    state.suppressCalendarScheduleClick = false;
+  }, 300);
+
+  const item = findItem(drag.id);
+  if (!item) return;
+
+  try {
+    await updateCalendarScheduleRange(item, startDate, endDate);
+  } catch (error) {
+    setStatus(error.message || "일정 날짜를 변경하지 못했습니다.");
+    render();
+  }
+}
+
+function cancelCalendarScheduleDrag() {
+  clearCalendarScheduleDragState();
+}
+
+function updateCalendarScheduleDragTarget(event) {
+  const drag = state.calendarScheduleDrag;
+  const targetDate = calendarDateFromPoint(event);
+  if (!targetDate) return;
+
+  const delta = daysBetween(drag.grabbedDate, targetDate);
+  drag.targetStartDate = addDays(drag.originalStartDate, delta);
+  drag.targetEndDate = addDays(drag.originalEndDate, delta);
+}
+
+function markCalendarScheduleDragDates() {
+  clearCalendarScheduleDragDates();
+  if (!state.calendarScheduleDrag) return;
+
+  const range = selectedDateRange(state.calendarScheduleDrag.targetStartDate, state.calendarScheduleDrag.targetEndDate);
+  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
+    const date = day.dataset.date;
+    if (date >= range.startDate && date <= range.endDate) {
+      day.classList.add("calendar-drag-target");
+    }
+  });
+}
+
+function clearCalendarScheduleDragDates() {
+  document.querySelectorAll(".day-cell.calendar-drag-target").forEach((day) => day.classList.remove("calendar-drag-target"));
+}
+
+function clearCalendarScheduleDragState() {
+  if (!state.calendarScheduleDrag) return;
+  state.calendarScheduleDrag.element.classList.remove("dragging");
+  clearCalendarScheduleDragDates();
+  state.calendarScheduleDrag = null;
+}
+
+function startCalendarZoomGesture(event) {
+  if (state.tab !== "calendar") return;
+  const grid = event.target.closest(".schedule-calendar");
+  if (!grid) return;
+
+  if (!state.calendarZoomGesture) {
+    state.calendarZoomGesture = {
+      active: false,
+      grid,
+      initialDistance: 0,
+      initialZoom: state.calendarZoom,
+      moved: false,
+      points: new Map()
+    };
+  }
+
+  const gesture = state.calendarZoomGesture;
+  gesture.grid = grid;
+  gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+  if (gesture.points.size < 2 || gesture.active) return;
+
+  const distance = calendarZoomGestureDistance(gesture);
+  if (!distance) return;
+
+  clearCalendarScheduleDragState();
+  clearCalendarScheduleResizeState(false);
+  gesture.active = true;
+  gesture.initialDistance = distance;
+  gesture.initialZoom = state.calendarZoom;
+  suppressCalendarGestureClicks();
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function moveCalendarZoomGesture(event) {
+  const gesture = state.calendarZoomGesture;
+  if (!gesture || !gesture.points.has(event.pointerId)) return;
+
+  gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (!gesture.active) return;
+
+  const distance = calendarZoomGestureDistance(gesture);
+  if (!distance || !gesture.initialDistance) return;
+
+  const previousZoom = state.calendarZoom;
+  const nextZoom = snapCalendarZoomToDefault(clampCalendarZoom(gesture.initialZoom * (distance / gesture.initialDistance)));
+  const moved = Math.abs(distance - gesture.initialDistance) > 8 || Math.abs(nextZoom - gesture.initialZoom) > 0.01;
+  if (moved) gesture.moved = true;
+
+  if (nextZoom !== previousZoom) {
+    state.calendarZoom = nextZoom;
+    triggerDefaultCalendarZoomPulse(crossedDefaultCalendarZoom(previousZoom, nextZoom), false);
+    applyCalendarZoomToDom();
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function finishCalendarZoomGesture(event) {
+  const gesture = state.calendarZoomGesture;
+  if (!gesture || !gesture.points.has(event.pointerId)) return;
+
+  gesture.points.delete(event.pointerId);
+  if (gesture.points.size >= 2) return;
+
+  const moved = gesture.active && gesture.moved;
+  state.calendarZoomGesture = null;
+
+  if (!moved) return;
+
+  suppressCalendarGestureClicks();
+  render();
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function calendarZoomGestureDistance(gesture) {
+  const points = [...gesture.points.values()];
+  if (points.length < 2) return 0;
+
+  const [first, second] = points;
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
+
+function suppressCalendarGestureClicks() {
+  state.suppressCalendarClick = true;
+  state.suppressCalendarScheduleClick = true;
+  window.setTimeout(() => {
+    state.suppressCalendarClick = false;
+    state.suppressCalendarScheduleClick = false;
+  }, 280);
+}
+
 function updateCalendarScheduleResizeTarget(event) {
   const resize = state.calendarScheduleResize;
   const targetDate = calendarDateFromPoint(event);
@@ -2142,14 +2943,88 @@ async function removeEmotion(date) {
 }
 
 function setTab(tab) {
+  const changed = state.tab !== tab;
+  const today = todayString();
   state.tab = tab;
   state.lastCalendarClick = null;
   state.lastEmotionClick = null;
+  if (changed) {
+    state.selectedDate = today;
+    state.visibleMonth = monthStart(today);
+    state.calendarZoomGesture = null;
+    resetCalendarZoom(false);
+  }
   if (tab !== "emotion") state.selectedEmotionDate = null;
+  if (tab !== "emotion") state.selectedChallengeLayer = null;
   if (tab !== "calendar") state.selectedCalendarSchedule = null;
   if (tab !== "calendar" && els.calendarTimelineDialog.open) els.calendarTimelineDialog.close();
   clearSelectedTimelineRange();
   render();
+}
+
+function adjustCalendarZoom(delta) {
+  const previousZoom = state.calendarZoom;
+  const nextZoom = clampCalendarZoom(previousZoom + delta);
+  state.calendarZoom = snapCalendarZoomToDefault(nextZoom);
+  triggerDefaultCalendarZoomPulse(crossedDefaultCalendarZoom(previousZoom, state.calendarZoom));
+  render();
+}
+
+function resetCalendarZoom(withPulse) {
+  state.calendarZoom = CALENDAR_ZOOM_DEFAULT;
+  triggerDefaultCalendarZoomPulse(withPulse);
+}
+
+function triggerDefaultCalendarZoomPulse(active, renderAfterPulse = true) {
+  window.clearTimeout(state.calendarZoomPulseTimer);
+  state.calendarZoomPulse = Boolean(active);
+  if (!active) return;
+
+  state.calendarZoomPulseTimer = window.setTimeout(() => {
+    state.calendarZoomPulse = false;
+    if (state.tab !== "calendar") return;
+    if (renderAfterPulse) {
+      render();
+      return;
+    }
+    applyCalendarZoomToDom();
+  }, 320);
+}
+
+function applyCalendarZoomToDom() {
+  const grid = document.querySelector(".schedule-calendar");
+  if (!grid) return;
+
+  const scheduleRowCount = Number(
+    grid.style.getPropertyValue("--schedule-row-count") ||
+    getComputedStyle(grid).getPropertyValue("--schedule-row-count")
+  ) || 2;
+
+  calendarZoomStyle(scheduleRowCount).split(";").forEach((rule) => {
+    const [property, value] = rule.split(":");
+    if (!property || !value) return;
+    grid.style.setProperty(property.trim(), value.trim());
+  });
+  grid.classList.toggle("zoom-default-hit", state.calendarZoomPulse);
+  document
+    .querySelector("[data-action='calendar-zoom-reset']")
+    ?.classList.toggle("is-default", isDefaultCalendarZoom());
+}
+
+function clampCalendarZoom(value) {
+  return Math.max(CALENDAR_ZOOM_MIN, Math.min(CALENDAR_ZOOM_MAX, Math.round(value * 100) / 100));
+}
+
+function snapCalendarZoomToDefault(value) {
+  return Math.abs(value - CALENDAR_ZOOM_DEFAULT) < 0.02 ? CALENDAR_ZOOM_DEFAULT : value;
+}
+
+function crossedDefaultCalendarZoom(previousZoom, nextZoom) {
+  return nextZoom === CALENDAR_ZOOM_DEFAULT && previousZoom !== CALENDAR_ZOOM_DEFAULT;
+}
+
+function isDefaultCalendarZoom() {
+  return state.calendarZoom === CALENDAR_ZOOM_DEFAULT;
 }
 
 function findItem(id) {
@@ -2248,8 +3123,12 @@ function timeSlots() {
 
 function calendarDays(monthDate) {
   const first = monthStart(monthDate);
+  const last = monthEnd(monthDate);
   const start = addDays(first, -new Date(`${first}T00:00:00`).getDay());
-  return Array.from({ length: 42 }, (_, index) => {
+  const end = addDays(last, 6 - new Date(`${last}T00:00:00`).getDay());
+  const length = daysBetween(start, end) + 1;
+
+  return Array.from({ length }, (_, index) => {
     const date = addDays(start, index);
     return {
       date,
@@ -2280,6 +3159,12 @@ function addDays(date, amount) {
   const next = new Date(`${date}T00:00:00`);
   next.setDate(next.getDate() + amount);
   return toDateString(next);
+}
+
+function daysBetween(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  return Math.round((end - start) / 86400000);
 }
 
 function addMonths(date, amount) {

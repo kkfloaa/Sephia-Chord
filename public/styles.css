@@ -395,6 +395,7 @@ h3 {
 
 .timeline {
   --slot-height: 56px;
+  --timeline-time-width: 62px;
   position: relative;
   display: grid;
   border: 1px solid var(--line);
@@ -406,7 +407,7 @@ h3 {
 .slot {
   position: relative;
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: var(--timeline-time-width) 1fr;
   gap: 8px;
   min-height: var(--slot-height);
   border-bottom: 1px solid #2d2119;
@@ -435,11 +436,18 @@ h3 {
   display: grid;
   gap: 6px;
   min-height: 28px;
+  touch-action: none;
 }
 
 .slot-time {
+  display: inline-flex;
+  align-self: start;
+  justify-self: start;
+  width: max-content;
+  line-height: 1.2;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
+  touch-action: pan-y;
 }
 
 .timeline-layer {
@@ -447,7 +455,7 @@ h3 {
   top: 0;
   right: 8px;
   bottom: 0;
-  left: 72px;
+  left: calc(var(--timeline-time-width) + 16px);
   pointer-events: none;
 }
 
@@ -728,6 +736,147 @@ h3 {
   height: 100%;
 }
 
+.challenge-panel {
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: min(72dvh, 640px);
+  overflow: hidden;
+}
+
+.challenge-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.challenge-level-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.challenge-layer-count {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.challenge-gallery-button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.challenge-progress-bar {
+  overflow: hidden;
+  height: 5px;
+  border-radius: 999px;
+  background: #21160f;
+}
+
+.challenge-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #87430f, #c47b3c, #f1d8bd);
+}
+
+.challenge-art {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fffaf4;
+  box-shadow: inset 0 0 0 1px rgb(15 12 9 / 10%);
+}
+
+.challenge-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #fffaf4;
+  object-fit: contain;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.challenge-complete {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #1f1711, #17110d);
+  color: var(--accent-strong);
+  font-size: 18px;
+}
+
+.challenge-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.challenge-gallery-card {
+  display: grid;
+  gap: 6px;
+  overflow: hidden;
+  min-height: 178px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #14100d;
+  padding: 8px;
+}
+
+.challenge-gallery-card.locked {
+  place-items: center;
+  background: linear-gradient(180deg, #1a130e, #100c09);
+  color: var(--muted);
+}
+
+.challenge-gallery-mask {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid #4b392d;
+  border-radius: 50%;
+  background: #21160f;
+  color: var(--accent-strong);
+  font-size: 34px;
+}
+
+.challenge-gallery-canvas {
+  width: 100%;
+  height: 148px;
+  border-radius: 6px;
+  background: #fffaf4;
+  object-fit: contain;
+}
+
+.challenge-gallery-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.challenge-gallery-meta strong {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
 .day-cell.has-emotion {
   border-color: var(--emotion-border);
   background: var(--emotion-bg);
@@ -742,17 +891,94 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.month-header div {
-  display: flex;
   gap: 8px;
 }
 
+.month-header h2 {
+  flex: 1 1 auto;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.month-header > button,
+.month-header .calendar-header-actions button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.calendar-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.calendar-zoom-button {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.calendar-zoom-reset {
+  position: relative;
+}
+
+.calendar-zoom-reset::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgb(241 216 189 / 72%);
+  border-radius: 50%;
+  background: transparent;
+  content: "";
+  transform: translate(-50%, -50%);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.calendar-zoom-reset.is-default::before {
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 3px rgb(241 216 189 / 12%);
+}
+
 .calendar-grid {
+  --calendar-day-height: 54px;
+  --schedule-row-height: 15px;
+  --calendar-gap: 5px;
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 5px;
+  gap: var(--calendar-gap);
+}
+
+.schedule-calendar {
+  --calendar-day-height: calc(24px + var(--schedule-row-count, 2) * var(--schedule-row-height));
+  border-radius: var(--radius);
+  touch-action: none;
+}
+
+.schedule-calendar.zoom-default-hit {
+  animation: calendar-zoom-default-hit 320ms ease;
+}
+
+@keyframes calendar-zoom-default-hit {
+  0% {
+    filter: brightness(1);
+  }
+
+  38% {
+    filter: brightness(1.18);
+    box-shadow: 0 0 0 1px rgb(241 216 189 / 42%);
+  }
+
+  100% {
+    filter: brightness(1);
+  }
+}
+
+.emotion-calendar {
+  --calendar-day-height: 54px;
 }
 
 .weekday,
@@ -782,8 +1008,9 @@ h3 {
 .emotion-calendar .day-cell {
   align-content: start;
   grid-template-rows: auto 1fr;
+  height: var(--calendar-day-height);
   justify-items: stretch;
-  min-height: 76px;
+  min-height: 0;
   gap: 4px;
   overflow: hidden;
   padding: 6px;
@@ -809,7 +1036,8 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--accent-strong);
 }
 
-.day-cell.calendar-resize-target {
+.day-cell.calendar-resize-target,
+.day-cell.calendar-drag-target {
   box-shadow: inset 0 0 0 1px rgb(241 216 189 / 82%);
 }
 
@@ -825,30 +1053,34 @@ h3 {
 .day-number {
   justify-self: start;
   color: inherit;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
 }
 
 .day-schedules {
-  display: grid;
-  align-content: start;
-  gap: 3px;
+  position: relative;
+  display: block;
   min-width: 0;
+  min-height: calc(var(--schedule-row-count, 2) * var(--schedule-row-height));
 }
 
 .schedule-chip,
 .schedule-more {
   display: block;
-  position: relative;
+  position: absolute;
+  top: calc(var(--schedule-row, 0) * var(--schedule-row-height));
+  right: 0;
+  left: 0;
   z-index: 1;
   overflow: hidden;
+  height: var(--schedule-chip-height, 13px);
   border: 1px solid #8b5a31;
   border-radius: 4px;
   background: #3b2415;
   color: #f1d8bd;
-  font-size: 10px;
-  line-height: 1.25;
-  padding: 2px 4px;
+  font-size: var(--schedule-chip-font-size, 9px);
+  line-height: 1.15;
+  padding: 1px 4px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -868,6 +1100,12 @@ h3 {
 
 .schedule-chip.resizing {
   box-shadow: 0 0 0 1px var(--accent-strong), 0 6px 16px rgb(0 0 0 / 24%);
+}
+
+.schedule-chip.dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 0 0 1px var(--accent-strong), 0 8px 18px rgb(0 0 0 / 30%);
 }
 
 .calendar-resize-handle {
@@ -947,6 +1185,7 @@ h3 {
 }
 
 .schedule-more {
+  height: auto;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -1317,14 +1556,14 @@ dialog::backdrop {
   }
 
   .slot {
-    grid-template-columns: 50px 1fr;
+    --timeline-time-width: 58px;
     gap: 6px;
     padding: 8px 6px;
   }
 
   .timeline-layer {
     right: 6px;
-    left: 62px;
+    left: calc(var(--timeline-time-width) + 12px);
   }
 
   .timeline-layer .timeline-item {
@@ -1365,13 +1604,38 @@ dialog::backdrop {
   }
 
   .calendar-grid {
-    gap: 4px;
+    --calendar-day-height: 50px;
+    --schedule-row-height: 14px;
+    --calendar-gap: 4px;
+    gap: var(--calendar-gap);
+  }
+
+  .schedule-calendar {
+    --calendar-day-height: calc(23px + var(--schedule-row-count, 2) * var(--schedule-row-height));
+  }
+
+  .emotion-calendar {
+    --calendar-day-height: 50px;
   }
 
   .schedule-calendar .day-cell,
   .emotion-calendar .day-cell {
-    min-height: 70px;
+    height: var(--calendar-day-height);
+    min-height: 0;
     padding: 5px;
+  }
+
+  .day-schedules {
+    min-height: calc(var(--schedule-row-count, 2) * var(--schedule-row-height));
+  }
+
+  .schedule-chip,
+  .schedule-more {
+    height: var(--schedule-chip-height, 12px);
+    font-size: var(--schedule-chip-font-size, 8px);
+    line-height: 1.05;
+    padding-top: 1px;
+    padding-bottom: 0;
   }
 
   .picker-time-grid {
