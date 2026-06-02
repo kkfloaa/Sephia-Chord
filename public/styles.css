@@ -1,0 +1,687 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f0c09;
+  --panel: #1b1510;
+  --panel-soft: #261b13;
+  --line: #3b2e24;
+  --text: #f8f0e5;
+  --muted: #b3a390;
+  --accent: #c47b3c;
+  --accent-strong: #f1d8bd;
+  --danger: #ef978b;
+  --ok: #b8d19f;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  position: relative;
+  margin: 0;
+  background: #0b0907;
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgb(15 12 9 / 78%), rgb(15 12 9 / 96%)),
+    url("/assets/sephia-chord-tone.png");
+  background-position: top -300px right -430px;
+  background-repeat: no-repeat;
+  background-size: 1040px 1040px;
+  content: "";
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #2b1f16, var(--panel-soft));
+  color: var(--text);
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button.primary {
+  border-color: #9d6331;
+  background: linear-gradient(180deg, #4a2b17, #2b1b12);
+  color: var(--accent-strong);
+}
+
+button.danger {
+  border-color: #7a4339;
+  background: #321b18;
+  color: var(--danger);
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #100d0a;
+  color: var(--text);
+  min-height: 42px;
+  padding: 9px 10px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 520px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 18px 14px 84px;
+}
+
+.auth-view {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-height: 100vh;
+  padding: 22px 18px calc(22px + env(safe-area-inset-bottom));
+  background:
+    linear-gradient(180deg, rgb(20 9 1 / 14%), rgb(18 8 1 / 8%) 45%, rgb(18 8 1 / 16%)),
+    url("/assets/sephia-chord-tone.png") right 36% center / cover no-repeat;
+}
+
+.panel {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgb(31 23 17 / 96%), rgb(19 14 10 / 98%));
+  padding: 18px;
+}
+
+.auth-view .panel::before {
+  display: none;
+}
+
+.auth-view .panel > * {
+  position: relative;
+}
+
+.auth-view .panel {
+  width: min(100%, 360px);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.auth-view .auth-logo,
+.auth-view .auth-brand {
+  display: none;
+}
+
+.pin-login {
+  display: grid;
+  gap: 24px;
+}
+
+.pin-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pin-dots {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  min-height: 16px;
+}
+
+.pin-dots span {
+  width: 11px;
+  height: 11px;
+  border: 1px solid rgb(255 242 226 / 58%);
+  border-radius: 50%;
+  background: transparent;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.pin-dots span.filled {
+  border-color: #fff6ec;
+  background: #fff6ec;
+  transform: scale(1.05);
+}
+
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  justify-content: center;
+  gap: 12px 18px;
+}
+
+.pin-keypad button {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff8ef;
+  font-size: 24px;
+  min-height: 64px;
+  padding: 0;
+}
+
+.pin-keypad button:active {
+  background: rgb(255 238 214 / 12%);
+}
+
+.auth-logo {
+  width: min(100%, 280px);
+  aspect-ratio: 1;
+  margin: 0 auto 2px;
+  border: 1px solid #5a341c;
+  border-radius: var(--radius);
+  background: #2b1203 url("/assets/sephia-chord-logo.png") center / cover no-repeat;
+}
+
+.auth-brand,
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-lockup h1 {
+  line-height: 1.05;
+}
+
+.auth-brand {
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  border: 1px solid #6a4328;
+  border-radius: 7px;
+  background: #2b1203 url("/assets/sephia-chord-logo.png") center / cover no-repeat;
+  box-shadow: inset 0 0 0 1px rgb(255 238 214 / 8%);
+}
+
+.brand-mark-large {
+  width: 54px;
+  min-width: 54px;
+  height: 54px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #d5b994;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: 18px;
+}
+
+h3 {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0 14px;
+  background: linear-gradient(180deg, rgb(15 12 9 / 96%), rgb(15 12 9 / 82%));
+  backdrop-filter: blur(10px);
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.message {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tab-view {
+  display: grid;
+  gap: 14px;
+}
+
+.section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.section-header button {
+  min-height: 34px;
+}
+
+.section-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.timeline {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(13 10 8 / 62%);
+  overflow: hidden;
+}
+
+.slot {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  min-height: 44px;
+  border-bottom: 1px solid #2d2119;
+  padding: 8px;
+  touch-action: none;
+  user-select: none;
+}
+
+.slot.selecting {
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.slot:last-child {
+  border-bottom: 0;
+}
+
+.slot-body {
+  min-height: 28px;
+}
+
+.slot-time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.item-list {
+  display: grid;
+  gap: 8px;
+}
+
+.item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #1f1711, #17110d);
+  padding: 10px;
+  text-align: left;
+}
+
+.item.done .item-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.item-main {
+  min-width: 0;
+}
+
+.item-main-button {
+  min-width: 0;
+  min-height: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.edit-button {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.item-title {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.checkbox {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #120e0b;
+  color: var(--ok);
+}
+
+.tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.emotion-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #1f1711, #17110d);
+  padding: 10px;
+}
+
+.emotion-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.emotion-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+}
+
+.emotion-button {
+  display: block;
+  aspect-ratio: 1;
+  min-height: 36px;
+  min-width: 0;
+  border-color: var(--emotion-swatch-border);
+  background: var(--emotion-swatch);
+  padding: 0;
+}
+
+.emotion-button.selected {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px #0f0c09, 0 0 0 4px var(--accent-strong);
+}
+
+.emotion-dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.day-cell.has-emotion {
+  border-color: var(--emotion-border);
+  background: var(--emotion-bg);
+  color: var(--emotion-text);
+}
+
+.day-cell.has-emotion.selected {
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.month-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.month-header div {
+  display: flex;
+  gap: 8px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+
+.weekday,
+.day-cell {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border-radius: var(--radius);
+}
+
+.weekday {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-cell {
+  position: relative;
+  border: 1px solid #2d2119;
+  background: #14100d;
+  color: var(--text);
+  touch-action: none;
+  user-select: none;
+}
+
+.day-cell.muted {
+  color: #6f6255;
+}
+
+.day-cell.selected {
+  border-color: #be7a3a;
+  background: #21160f;
+  color: var(--accent-strong);
+}
+
+.day-cell.calendar-selecting {
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.day-cell .dot {
+  position: absolute;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: rgb(16 13 10 / 54%);
+  padding: 16px;
+  text-align: center;
+}
+
+.bottom-nav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  width: min(100%, 520px);
+  margin: 0 auto;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgb(15 12 9 / 82%), rgb(15 12 9 / 96%));
+  backdrop-filter: blur(10px);
+}
+
+.bottom-nav button {
+  min-height: 40px;
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+.bottom-nav button.active {
+  border-color: #9d6331;
+  background: #25180f;
+  color: var(--accent-strong);
+}
+
+dialog {
+  width: min(calc(100% - 24px), 520px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(31 23 17 / 98%), rgb(17 13 10 / 99%)),
+    url("/assets/sephia-chord-tone.png");
+  background-position: center, bottom -260px right -270px;
+  background-repeat: no-repeat;
+  background-size: auto, 620px 620px;
+  color: var(--text);
+  padding: 0;
+}
+
+dialog::backdrop {
+  background: rgb(5 3 2 / 72%);
+}
+
+.dialog-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.dialog-header,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field-label {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chips {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.chips label {
+  display: grid;
+  min-height: 36px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.chips input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chips label:has(input:checked) {
+  border-color: #9d6331;
+  background: #25180f;
+}
+
+[hidden] {
+  display: none !important;
+}

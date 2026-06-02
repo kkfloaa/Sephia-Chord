@@ -1,0 +1,17 @@
+{
+  "name": "Sephia Chord",
+  "short_name": "Sephia",
+  "description": "A mobile-first personal planner for schedules, tasks, routines, and emotion records.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0c09",
+  "theme_color": "#0f0c09",
+  "icons": [
+    {
+      "src": "/assets/sephia-chord-logo.png",
+      "sizes": "2000x2000",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
