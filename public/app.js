@@ -11,6 +11,7 @@ const state = {
   selectedTimeRange: null,
   selectedTimelineItem: null,
   timeClickTimer: null,
+  timeSelectionHoldTimer: null,
   timelineDrag: null,
   timelineResize: null,
   suppressTimelineItemClick: false,
@@ -18,7 +19,7 @@ const state = {
   selectedCalendarSchedule: null,
   calendarScheduleResize: null,
   calendarScheduleDrag: null,
-  calendarZoom: 1,
+  calendarZoom: 1.48,
   calendarZoomGesture: null,
   calendarZoomPulse: false,
   calendarZoomPulseTimer: null,
@@ -39,10 +40,12 @@ const state = {
 };
 
 const PIN_LENGTH = 4;
-const CALENDAR_ZOOM_DEFAULT = 1;
 const CALENDAR_ZOOM_MIN = 0.76;
 const CALENDAR_ZOOM_MAX = 1.48;
+const CALENDAR_ZOOM_DEFAULT = CALENDAR_ZOOM_MAX;
 const CALENDAR_ZOOM_STEP = 0.12;
+const TIMELINE_TOUCH_HOLD_DELAY = 260;
+const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
 const CHALLENGE_CANVAS_WIDTH = 720;
 const CHALLENGE_WHITE_THRESHOLD = 250;
 const CHALLENGE_MIN_LAYER_AREA = 400;
@@ -329,19 +332,6 @@ function bindEvents() {
       state.visibleMonth = addMonths(state.visibleMonth, 1);
       await loadItems();
     }
-    if (action.dataset.action === "calendar-zoom-out") {
-      adjustCalendarZoom(-CALENDAR_ZOOM_STEP);
-      return;
-    }
-    if (action.dataset.action === "calendar-zoom-in") {
-      adjustCalendarZoom(CALENDAR_ZOOM_STEP);
-      return;
-    }
-    if (action.dataset.action === "calendar-zoom-reset") {
-      resetCalendarZoom(true);
-      render();
-      return;
-    }
   });
 
   document.body.addEventListener("dblclick", async (event) => {
@@ -400,10 +390,6 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarScheduleDrag);
   document.body.addEventListener("pointerup", finishCalendarScheduleDrag);
   document.body.addEventListener("pointercancel", cancelCalendarScheduleDrag);
-  document.body.addEventListener("pointerdown", startCalendarZoomGesture);
-  document.body.addEventListener("pointermove", moveCalendarZoomGesture);
-  document.body.addEventListener("pointerup", finishCalendarZoomGesture);
-  document.body.addEventListener("pointercancel", finishCalendarZoomGesture);
   document.body.addEventListener("pointerdown", startCalendarSelection);
   document.body.addEventListener("pointermove", moveCalendarSelection);
   document.body.addEventListener("pointerup", finishCalendarSelection);
@@ -734,23 +720,14 @@ function renderCalendar() {
   const monthLabel = state.visibleMonth.slice(0, 7);
   const scheduleRows = calendarScheduleRows(days);
   const scheduleRowCount = calendarScheduleDisplayRowCount(days, scheduleRows);
-  const calendarClasses = [
-    "calendar-grid",
-    "schedule-calendar",
-    state.calendarZoomPulse ? "zoom-default-hit" : ""
-  ].filter(Boolean).join(" ");
+  const calendarClasses = "calendar-grid schedule-calendar";
 
   els.calendarTab.innerHTML = `
     <section class="section">
       <div class="month-header">
         <button type="button" data-action="month-prev">‹</button>
         <h2>${monthLabel}</h2>
-        <div class="calendar-header-actions">
-          <button type="button" class="calendar-zoom-button" data-action="calendar-zoom-out" aria-label="캘린더 축소">−</button>
-          <button type="button" class="calendar-zoom-reset ${isDefaultCalendarZoom() ? "is-default" : ""}" data-action="calendar-zoom-reset" aria-label="기본 크기로 복귀"></button>
-          <button type="button" class="calendar-zoom-button" data-action="calendar-zoom-in" aria-label="캘린더 확대">+</button>
-          <button type="button" data-action="month-next">›</button>
-        </div>
+        <button type="button" data-action="month-next">›</button>
       </div>
       <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount)}">
         ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
@@ -761,7 +738,7 @@ function renderCalendar() {
 }
 
 function calendarZoomStyle(scheduleRowCount) {
-  const zoom = state.calendarZoom;
+  const zoom = CALENDAR_ZOOM_MAX;
   const compact = window.matchMedia?.("(max-width: 430px)").matches;
   const base = compact
     ? { top: 23, row: 14, chip: 12, font: 8, gap: 4 }
@@ -1931,10 +1908,13 @@ function startTimeSelection(event) {
   if (
     !slot ||
     event.target.closest(".slot-time") ||
+    isTimelineTimeRailPointer(event, slot) ||
     event.target.closest("button, input, textarea, select")
   ) return;
   const context = timelineContextFromSlot(slot);
+  const holdDelay = event.pointerType === "touch" ? TIMELINE_TOUCH_HOLD_DELAY : 0;
 
+  window.clearTimeout(state.timeSelectionHoldTimer);
   state.timeSelection = {
     pointerId: event.pointerId,
     context,
@@ -1943,17 +1923,58 @@ function startTimeSelection(event) {
     currentTime: slot.dataset.timeSlot,
     startX: event.clientX,
     startY: event.clientY,
+    lastScrollY: event.clientY,
+    pointerType: event.pointerType || "mouse",
+    active: holdDelay === 0,
+    cancelled: false,
+    scrolling: false,
     moved: false
   };
-  slot.setPointerCapture?.(event.pointerId);
-  markSelectedTimeSlots();
+  try {
+    slot.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can fail when the browser does not consider the pointer active.
+  }
+
+  if (holdDelay === 0) {
+    markSelectedTimeSlots();
+    return;
+  }
+
+  state.timeSelectionHoldTimer = window.setTimeout(() => {
+    if (!state.timeSelection || state.timeSelection.pointerId !== event.pointerId || state.timeSelection.cancelled) return;
+    state.timeSelection.active = true;
+    markSelectedTimeSlots();
+  }, holdDelay);
+}
+
+function isTimelineTimeRailPointer(event, slot) {
+  const body = slot.querySelector(".slot-body");
+  if (!body) return false;
+  return event.clientX < body.getBoundingClientRect().left;
 }
 
 function moveTimeSelection(event) {
   if (!state.timeSelection || state.timeSelection.pointerId !== event.pointerId) return;
 
   const distance = Math.abs(event.clientX - state.timeSelection.startX) + Math.abs(event.clientY - state.timeSelection.startY);
-  if (distance > 10) state.timeSelection.moved = true;
+  if (!state.timeSelection.active) {
+    if (state.timeSelection.cancelled) {
+      scrollTimelineTouchGesture(event);
+      return;
+    }
+    if (distance > TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE) {
+      state.timeSelection.cancelled = true;
+      state.timeSelection.moved = true;
+      state.timeSelection.scrolling = state.timeSelection.pointerType === "touch";
+      window.clearTimeout(state.timeSelectionHoldTimer);
+      state.timeSelectionHoldTimer = null;
+      scrollTimelineTouchGesture(event);
+    }
+    return;
+  }
+
+  if (distance > TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE) state.timeSelection.moved = true;
 
   const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-time-slot]");
   if (!target) return;
@@ -1962,14 +1983,25 @@ function moveTimeSelection(event) {
   markSelectedTimeSlots();
 }
 
+function scrollTimelineTouchGesture(event) {
+  if (!state.timeSelection?.scrolling) return;
+  const delta = state.timeSelection.lastScrollY - event.clientY;
+  state.timeSelection.lastScrollY = event.clientY;
+  if (delta) window.scrollBy(0, delta);
+  event.preventDefault?.();
+}
+
 function finishTimeSelection(event) {
   if (!state.timeSelection || state.timeSelection.pointerId !== event.pointerId) return;
 
   const selection = state.timeSelection;
   const { startTime, endTime } = selectedTimeRange(selection.startTime, selection.currentTime);
+  window.clearTimeout(state.timeSelectionHoldTimer);
+  state.timeSelectionHoldTimer = null;
   state.timeSelection = null;
   clearSelectedTimeSlots();
 
+  if (selection.cancelled) return;
   if (event.target.closest("button, input, textarea, select")) return;
 
   const nextSelection = {
@@ -1998,6 +2030,8 @@ function finishTimeSelection(event) {
 }
 
 function cancelTimeSelection() {
+  window.clearTimeout(state.timeSelectionHoldTimer);
+  state.timeSelectionHoldTimer = null;
   state.timeSelection = null;
   clearSelectedTimeSlots();
 }
@@ -2695,7 +2729,10 @@ function clearSelectedTimeSlots() {
 
 function clearSelectedTimelineRange() {
   window.clearTimeout(state.timeClickTimer);
+  window.clearTimeout(state.timeSelectionHoldTimer);
   state.timeClickTimer = null;
+  state.timeSelectionHoldTimer = null;
+  state.timeSelection = null;
   state.selectedTimeRange = null;
   state.selectedTimelineItem = null;
   clearSelectedTimeSlots();

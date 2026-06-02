@@ -412,7 +412,7 @@ h3 {
   min-height: var(--slot-height);
   border-bottom: 1px solid #2d2119;
   padding: 8px;
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
 }
 
