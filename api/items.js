@@ -111,6 +111,11 @@ async function createItem(req, res) {
     return;
   }
 
+  if (body.type === "감정" && body.date) {
+    await upsertEmotionItem(res, body, schema, titleProperty);
+    return;
+  }
+
   const payload = await notionRequest("/pages", {
     method: "POST",
     body: {
@@ -122,6 +127,88 @@ async function createItem(req, res) {
   });
 
   json(res, 201, { item: normalizeItem(payload, schema, titleProperty) });
+}
+
+async function upsertEmotionItem(res, body, schema, titleProperty) {
+  const existing = await findEmotionPagesByDate(body.date);
+
+  if (existing.length) {
+    const [primary, ...duplicates] = existing;
+    const payload = await notionRequest(`/pages/${primary.id}`, {
+      method: "PATCH",
+      body: {
+        properties: buildNotionProperties(body, schema, titleProperty)
+      }
+    });
+
+    await trashDuplicatePages(duplicates);
+    json(res, 200, { item: normalizeItem(payload, schema, titleProperty), deduped: duplicates.length });
+    return;
+  }
+
+  const payload = await notionRequest("/pages", {
+    method: "POST",
+    body: {
+      parent: {
+        data_source_id: getDataSourceId()
+      },
+      properties: buildNotionProperties(body, schema, titleProperty)
+    }
+  });
+
+  json(res, 201, { item: normalizeItem(payload, schema, titleProperty) });
+}
+
+async function findEmotionPagesByDate(date) {
+  const payload = await notionRequest(`/data_sources/${getDataSourceId()}/query`, {
+    method: "POST",
+    body: {
+      page_size: 100,
+      result_type: "page",
+      filter: {
+        and: [
+          {
+            property: "날짜",
+            date: {
+              equals: date
+            }
+          },
+          {
+            or: [
+              {
+                property: "유형",
+                select: {
+                  equals: "감정"
+                }
+              },
+              {
+                property: "유형",
+                select: {
+                  equals: "기분"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      sorts: [
+        { timestamp: "last_edited_time", direction: "descending" }
+      ]
+    }
+  });
+
+  return (payload.results || []).filter((item) => item.object === "page" && !item.in_trash);
+}
+
+async function trashDuplicatePages(pages) {
+  await Promise.all(
+    pages.map((page) =>
+      notionRequest(`/pages/${page.id}`, {
+        method: "PATCH",
+        body: { in_trash: true }
+      })
+    )
+  );
 }
 
 async function updateItem(req, res) {
@@ -168,8 +255,6 @@ async function trashItem(req, res) {
 function sanitizePayload(input, isPatch) {
   const allowedTypes = new Set(["일정", "할일", "루틴", "루틴기록", "감정", "기분"]);
   const allowedStatuses = new Set(["예정", "진행", "완료", "보류", "취소"]);
-  const allowedPriorities = new Set(["높음", "보통", "낮음"]);
-  const allowedCategories = new Set(["개인", "공부", "업무", "건강", "기타"]);
   const allowedDays = new Set(["월", "화", "수", "목", "금", "토", "일"]);
   const allowedEmotions = new Set([
     "빨강 5",
@@ -199,11 +284,14 @@ function sanitizePayload(input, isPatch) {
   if (input.endTime !== undefined && isTime(input.endTime)) body.endTime = input.endTime;
   if (input.completed !== undefined) body.completed = Boolean(input.completed);
   if (input.status !== undefined && allowedStatuses.has(input.status)) body.status = input.status;
-  if (input.priority !== undefined && allowedPriorities.has(input.priority)) body.priority = input.priority;
-  if (input.category !== undefined && allowedCategories.has(input.category)) body.category = input.category;
+  const hasEmotionInput = input.emotion !== undefined || input.mood !== undefined;
   const emotion = input.emotion !== undefined ? input.emotion : input.mood;
   const normalizedEmotion = normalizeEmotionValue(emotion);
-  if (normalizedEmotion !== undefined && allowedEmotions.has(normalizedEmotion)) body.emotion = normalizedEmotion;
+  if (hasEmotionInput && (emotion === null || String(emotion).trim() === "")) {
+    body.emotion = "";
+  } else if (normalizedEmotion !== undefined && allowedEmotions.has(normalizedEmotion)) {
+    body.emotion = normalizedEmotion;
+  }
   if (input.note !== undefined) body.note = String(input.note).slice(0, 2000);
   if (input.sourceRoutineId !== undefined) body.sourceRoutineId = String(input.sourceRoutineId);
 
@@ -214,20 +302,15 @@ function sanitizePayload(input, isPatch) {
   if (!isPatch) {
     if (body.type === "일정") {
       body.status = body.status || "예정";
-      body.category = body.category || "개인";
     }
     if (body.type === "할일") {
       body.status = body.completed ? "완료" : body.status || "예정";
-      body.priority = body.priority || "보통";
-      body.category = body.category || "개인";
     }
     if (body.type === "루틴") {
       body.status = body.status || "진행";
-      body.category = body.category || "개인";
     }
     if (body.type === "루틴기록") {
       body.status = body.completed ? "완료" : "예정";
-      body.category = body.category || "개인";
     }
     if (body.type === "기분") {
       body.type = "감정";
@@ -235,7 +318,6 @@ function sanitizePayload(input, isPatch) {
     if (body.type === "감정") {
       body.status = "완료";
       body.completed = true;
-      body.category = body.category || "개인";
     }
   }
 

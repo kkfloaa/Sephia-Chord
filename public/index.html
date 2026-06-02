@@ -119,25 +119,31 @@
           <div class="field-grid">
             <label>
               날짜
-              <input id="dateInput" type="date">
+              <input id="dateInput" type="text" inputmode="none" readonly data-picker="date">
             </label>
             <label id="endDateField">
               종료일
-              <input id="endDateInput" type="date">
+              <input id="endDateInput" type="text" inputmode="none" readonly data-picker="date">
             </label>
           </div>
         </div>
 
         <div id="scheduleFields" class="field-grid">
+          <label id="allDayField" class="inline-check field-wide">
+            <input id="allDayInput" type="checkbox">
+            <span>종일</span>
+          </label>
           <label>
             <span id="startTimeLabel">시작</span>
-            <input id="startTimeInput" type="time" min="08:00" max="22:00" step="1800">
+            <input id="startTimeInput" type="text" inputmode="none" readonly data-picker="time">
           </label>
           <label>
             <span id="endTimeLabel">종료</span>
-            <input id="endTimeInput" type="time" min="08:00" max="22:00" step="1800">
+            <input id="endTimeInput" type="text" inputmode="none" readonly data-picker="time">
           </label>
         </div>
+
+        <div id="pickerPanel" class="picker-panel" hidden></div>
 
         <div id="routineFields">
           <p class="field-label">반복요일</p>
@@ -152,27 +158,6 @@
           </div>
         </div>
 
-        <div class="field-grid">
-          <label>
-            카테고리
-            <select id="categoryInput">
-              <option value="개인">개인</option>
-              <option value="공부">공부</option>
-              <option value="업무">업무</option>
-              <option value="건강">건강</option>
-              <option value="기타">기타</option>
-            </select>
-          </label>
-          <label id="priorityField">
-            우선순위
-            <select id="priorityInput">
-              <option value="보통">보통</option>
-              <option value="높음">높음</option>
-              <option value="낮음">낮음</option>
-            </select>
-          </label>
-        </div>
-
         <label>
           메모
           <textarea id="noteInput" rows="3" maxlength="2000"></textarea>
@@ -183,6 +168,26 @@
           <button type="submit" class="primary">저장</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="emotionDialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <h2 id="emotionDialogTitle">감정</h2>
+          <button type="button" id="closeEmotionDialogButton" class="icon-button" title="닫기">×</button>
+        </div>
+        <div id="emotionDialogContent" class="emotion-dialog-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="calendarTimelineDialog" class="calendar-timeline-dialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <h2 id="calendarTimelineTitle">시간표</h2>
+          <button type="button" id="closeCalendarTimelineDialogButton" class="icon-button" title="닫기">×</button>
+        </div>
+        <div id="calendarTimelineContent" class="calendar-timeline-content"></div>
+      </div>
     </dialog>
 
     <script src="/app.js"></script>

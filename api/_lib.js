@@ -265,18 +265,22 @@ function buildNotionProperties(input, schema, detectedTitleProperty) {
     properties["날짜"] = dateProperty(input.date, false, input.endDate);
   }
 
-  const start = input.start || dateTimeWithOffset(input.date, input.startTime);
-  const end = input.end || dateTimeWithOffset(input.endDate || input.date, input.endTime);
-  addIfPresent(properties, schema, "시작", start, (value) => dateProperty(value, true));
-  addIfPresent(properties, schema, "종료", end, (value) => dateProperty(value, true));
+  const timeDate = input.date || (input.type === "루틴" ? "2000-01-01" : undefined);
+  const endTimeDate = input.endDate || input.date || (input.type === "루틴" ? "2000-01-01" : undefined);
+  const start = input.start !== undefined ? input.start : dateTimeWithOffset(timeDate, input.startTime);
+  const end = input.end !== undefined ? input.end : dateTimeWithOffset(endTimeDate, input.endTime);
+  if (input.start !== undefined || input.startTime !== undefined) {
+    addIfPresent(properties, schema, "시작", start, (value) => dateProperty(value, true));
+  }
+  if (input.end !== undefined || input.endTime !== undefined) {
+    addIfPresent(properties, schema, "종료", end, (value) => dateProperty(value, true));
+  }
 
   if (input.completed !== undefined && hasProperty(schema, "완료")) {
     properties["완료"] = checkboxProperty(input.completed);
   }
 
   addIfPresent(properties, schema, "상태", input.status, selectProperty);
-  addIfPresent(properties, schema, "우선순위", input.priority, selectProperty);
-  addIfPresent(properties, schema, "카테고리", input.category, selectProperty);
   addIfPresent(properties, schema, "감정", input.emotion, selectProperty);
   addIfPresent(properties, schema, "기분", input.emotion, selectProperty);
 
@@ -364,16 +368,17 @@ function normalizeItem(page, schema, detectedTitleProperty) {
     detectedTitleProperty ||
     Object.entries(properties).find(([, property]) => property && property.type === "title")?.[0] ||
     "제목";
+  const type = selectName(properties["유형"]);
   const start = dateStart(properties["시작"]);
   const end = dateStart(properties["종료"]);
-  const date = dateStart(properties["날짜"]) || start;
+  const date = dateStart(properties["날짜"]) || (type === "루틴" ? "" : start);
   const endDate = dateEnd(properties["날짜"]);
 
   return {
     id: page.id,
     url: page.url,
     title: plainText(properties[titleName]),
-    type: selectName(properties["유형"]),
+    type,
     date: normalizeDate(date),
     endDate: normalizeDate(endDate),
     start,
@@ -382,8 +387,6 @@ function normalizeItem(page, schema, detectedTitleProperty) {
     endTime: normalizeTime(end),
     completed: checkboxValue(properties["완료"]),
     status: selectName(properties["상태"]),
-    priority: selectName(properties["우선순위"]),
-    category: selectName(properties["카테고리"]),
     emotion: selectName(properties["감정"]) || selectName(properties["기분"]),
     mood: selectName(properties["감정"]) || selectName(properties["기분"]),
     repeatDays: multiSelectNames(properties["반복요일"]),
