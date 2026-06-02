@@ -1912,8 +1912,17 @@ function startTimeSelection(event) {
     event.target.closest("button, input, textarea, select")
   ) return;
   const context = timelineContextFromSlot(slot);
-  const holdDelay = event.pointerType === "touch" ? TIMELINE_TOUCH_HOLD_DELAY : 0;
+  const startsFromSelectedRange = timeRangeContainsSlot(
+    state.selectedTimeRange,
+    context,
+    state.selectedDate,
+    slot.dataset.timeSlot
+  );
+  const holdDelay = event.pointerType === "touch" && !startsFromSelectedRange
+    ? TIMELINE_TOUCH_HOLD_DELAY
+    : 0;
 
+  window.clearTimeout(state.timeClickTimer);
   window.clearTimeout(state.timeSelectionHoldTimer);
   state.timeSelection = {
     pointerId: event.pointerId,
@@ -1925,6 +1934,7 @@ function startTimeSelection(event) {
     startY: event.clientY,
     lastScrollY: event.clientY,
     pointerType: event.pointerType || "mouse",
+    scrollContainer: timelineScrollContainer(slot),
     active: holdDelay === 0,
     cancelled: false,
     scrolling: false,
@@ -1987,8 +1997,21 @@ function scrollTimelineTouchGesture(event) {
   if (!state.timeSelection?.scrolling) return;
   const delta = state.timeSelection.lastScrollY - event.clientY;
   state.timeSelection.lastScrollY = event.clientY;
-  if (delta) window.scrollBy(0, delta);
+  if (delta) {
+    const container = state.timeSelection.scrollContainer;
+    if (container) {
+      container.scrollTop += delta;
+    } else {
+      window.scrollBy(0, delta);
+    }
+  }
   event.preventDefault?.();
+}
+
+function timelineScrollContainer(slot) {
+  const container = slot.closest(".calendar-timeline-content");
+  if (container) return container;
+  return null;
 }
 
 function finishTimeSelection(event) {
