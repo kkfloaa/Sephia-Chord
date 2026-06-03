@@ -248,8 +248,17 @@ function dateProperty(value, isDateTime, end) {
 
 function dateTimeWithOffset(date, time) {
   if (!date || !time) return null;
-  const seconds = time.length === 5 ? `${time}:00` : time;
-  return `${date}T${seconds}${process.env.NOTION_TIME_ZONE_OFFSET || DEFAULT_TIME_ZONE_OFFSET}`;
+  const isEndOfDay = /^24:00(?::00)?$/.test(String(time));
+  const targetDate = isEndOfDay ? addDaysToDate(date, 1) : date;
+  const targetTime = isEndOfDay ? "00:00:00" : (time.length === 5 ? `${time}:00` : time);
+  return `${targetDate}T${targetTime}${process.env.NOTION_TIME_ZONE_OFFSET || DEFAULT_TIME_ZONE_OFFSET}`;
+}
+
+function addDaysToDate(date, amount) {
+  const [year, month, day] = String(date || "").split("-").map(Number);
+  if (!year || !month || !day) return date;
+  const next = new Date(Date.UTC(year, month - 1, day + amount));
+  return next.toISOString().slice(0, 10);
 }
 
 function buildNotionProperties(input, schema, detectedTitleProperty) {
@@ -373,18 +382,28 @@ function normalizeItem(page, schema, detectedTitleProperty) {
   const end = dateStart(properties["종료"]);
   const date = dateStart(properties["날짜"]) || (type === "루틴" ? "" : start);
   const endDate = dateEnd(properties["날짜"]);
+  const normalizedDate = normalizeDate(date);
+  const normalizedEndDate = normalizeDate(endDate);
+  const normalizedStartTime = normalizeTime(start);
+  const normalizedEndTime = normalizeBoundaryEndTime({
+    end,
+    endTime: normalizeTime(end),
+    itemDate: normalizedDate,
+    itemEndDate: normalizedEndDate,
+    startDate: normalizeDate(start)
+  });
 
   return {
     id: page.id,
     url: page.url,
     title: plainText(properties[titleName]),
     type,
-    date: normalizeDate(date),
-    endDate: normalizeDate(endDate),
+    date: normalizedDate,
+    endDate: normalizedEndDate,
     start,
     end,
-    startTime: normalizeTime(start),
-    endTime: normalizeTime(end),
+    startTime: normalizedStartTime,
+    endTime: normalizedEndTime,
     completed: checkboxValue(properties["완료"]),
     status: selectName(properties["상태"]),
     emotion: selectName(properties["감정"]) || selectName(properties["기분"]),
@@ -395,6 +414,14 @@ function normalizeItem(page, schema, detectedTitleProperty) {
     createdTime: page.created_time,
     lastEditedTime: page.last_edited_time
   };
+}
+
+function normalizeBoundaryEndTime({ end, endTime, itemDate, itemEndDate, startDate }) {
+  const referenceDate = itemEndDate || itemDate || startDate;
+  if (!end || endTime !== "00:00" || !referenceDate) return endTime;
+
+  const endDate = normalizeDate(end);
+  return endDate === addDaysToDate(referenceDate, 1) ? "24:00" : endTime;
 }
 
 function handleError(res, error) {

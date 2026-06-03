@@ -16,6 +16,7 @@ const state = {
   timelineResize: null,
   suppressTimelineItemClick: false,
   calendarSelection: null,
+  calendarMonthSwipe: null,
   selectedCalendarSchedule: null,
   calendarScheduleResize: null,
   calendarScheduleDrag: null,
@@ -34,6 +35,11 @@ const state = {
   emotionClickTimer: null,
   suppressEmotionDblclick: false,
   picker: null,
+  lastHapticAt: 0,
+  timeWheelSettleTimer: null,
+  timeWheelProgrammaticScroll: false,
+  suppressPickerOutsideClick: false,
+  pickerOutsideClickTimer: null,
   emotionSaving: false,
   challengeSaving: false,
   pinSubmitting: false
@@ -44,6 +50,22 @@ const CALENDAR_ZOOM_MIN = 0.76;
 const CALENDAR_ZOOM_MAX = 1.48;
 const CALENDAR_ZOOM_DEFAULT = CALENDAR_ZOOM_MAX;
 const CALENDAR_ZOOM_STEP = 0.12;
+const CALENDAR_MONTH_SWIPE_DISTANCE = 46;
+const CALENDAR_MONTH_SWIPE_RATIO = 1.08;
+const CALENDAR_MONTH_SWIPE_VISUAL_LIMIT = 82;
+const TIMELINE_START_MINUTES = 0;
+const TIMELINE_END_MINUTES = 24 * 60;
+const TIMELINE_ROW_MINUTES = 60;
+const TIMELINE_TIME_STEP_MINUTES = 5;
+const DEFAULT_ITEM_DURATION_MINUTES = 60;
+const FULL_DAY_START_TIME = "00:00";
+const FULL_DAY_END_TIME = "24:00";
+const DEFAULT_START_TIME = "08:00";
+const DEFAULT_END_TIME = "09:00";
+const HAPTIC_DURATION_MS = 8;
+const HAPTIC_MIN_INTERVAL_MS = 70;
+const TIME_WHEEL_SETTLE_DELAY_MS = 140;
+const TIME_WHEEL_LOOP_COPIES = 7;
 const TIMELINE_TOUCH_HOLD_DELAY = 260;
 const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
 const CHALLENGE_CANVAS_WIDTH = 720;
@@ -106,6 +128,51 @@ const CHALLENGE_COLORS = Array.from({ length: 64 }, (_, index) => {
   return hslToHex(hue, saturation, lightness);
 });
 const challengeImageCache = new Map();
+const buttonPressTimers = new WeakMap();
+const KOREAN_CALENDAR_MARKS = {
+  "2026-01-01": { label: "신정", kind: "holiday" },
+  "2026-02-16": { label: "설 연휴", kind: "festival" },
+  "2026-02-17": { label: "설날", kind: "festival" },
+  "2026-02-18": { label: "설 연휴", kind: "festival" },
+  "2026-03-01": { label: "삼일절", kind: "national" },
+  "2026-03-02": { label: "대체휴일", kind: "substitute" },
+  "2026-05-05": { label: "어린이날", kind: "holiday" },
+  "2026-05-24": { label: "부처님오신날", kind: "holiday" },
+  "2026-05-25": { label: "대체휴일", kind: "substitute" },
+  "2026-06-03": { label: "지방선거", kind: "holiday" },
+  "2026-06-06": { label: "현충일", kind: "holiday" },
+  "2026-07-17": { label: "제헌절", kind: "national-observed" },
+  "2026-08-15": { label: "광복절", kind: "national" },
+  "2026-08-17": { label: "대체휴일", kind: "substitute" },
+  "2026-09-24": { label: "추석 연휴", kind: "festival" },
+  "2026-09-25": { label: "추석", kind: "festival" },
+  "2026-09-26": { label: "추석 연휴", kind: "festival" },
+  "2026-10-03": { label: "개천절", kind: "national" },
+  "2026-10-05": { label: "대체휴일", kind: "substitute" },
+  "2026-10-09": { label: "한글날", kind: "national" },
+  "2026-12-25": { label: "성탄절", kind: "holiday" },
+  "2027-01-01": { label: "신정", kind: "holiday" },
+  "2027-02-06": { label: "설 연휴", kind: "festival" },
+  "2027-02-07": { label: "설날", kind: "festival" },
+  "2027-02-08": { label: "설 연휴", kind: "festival" },
+  "2027-02-09": { label: "대체휴일", kind: "substitute" },
+  "2027-03-01": { label: "삼일절", kind: "national" },
+  "2027-05-05": { label: "어린이날", kind: "holiday" },
+  "2027-05-13": { label: "부처님오신날", kind: "holiday" },
+  "2027-06-06": { label: "현충일", kind: "holiday" },
+  "2027-07-17": { label: "제헌절", kind: "national-observed" },
+  "2027-08-15": { label: "광복절", kind: "national" },
+  "2027-08-16": { label: "대체휴일", kind: "substitute" },
+  "2027-09-14": { label: "추석 연휴", kind: "festival" },
+  "2027-09-15": { label: "추석", kind: "festival" },
+  "2027-09-16": { label: "추석 연휴", kind: "festival" },
+  "2027-10-03": { label: "개천절", kind: "national" },
+  "2027-10-04": { label: "대체휴일", kind: "substitute" },
+  "2027-10-09": { label: "한글날", kind: "national" },
+  "2027-10-11": { label: "대체휴일", kind: "substitute" },
+  "2027-12-25": { label: "성탄절", kind: "holiday" },
+  "2027-12-27": { label: "대체휴일", kind: "substitute" }
+};
 
 const els = {
   allDayField: document.querySelector("#allDayField"),
@@ -142,8 +209,10 @@ const els = {
   routineFields: document.querySelector("#routineFields"),
   scheduleFields: document.querySelector("#scheduleFields"),
   selectedDateLabel: document.querySelector("#selectedDateLabel"),
+  startTimeDisplay: document.querySelector("#startTimeDisplay"),
   startTimeLabel: document.querySelector("#startTimeLabel"),
   startTimeInput: document.querySelector("#startTimeInput"),
+  endTimeDisplay: document.querySelector("#endTimeDisplay"),
   endTimeLabel: document.querySelector("#endTimeLabel"),
   statusMessage: document.querySelector("#statusMessage"),
   titleInput: document.querySelector("#titleInput"),
@@ -161,6 +230,9 @@ async function init() {
 function bindEvents() {
   els.loginForm.addEventListener("submit", login);
   document.addEventListener("keydown", handlePinKeydown);
+  document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
+  document.addEventListener("click", suppressPickerOutsideClick, true);
+  bindDialogButtonFeedback();
   document.querySelector("#logoutButton").addEventListener("click", logout);
   document.querySelector("#refreshButton").addEventListener("click", loadItems);
   els.closeCalendarTimelineDialogButton.addEventListener("click", () => els.calendarTimelineDialog.close());
@@ -170,6 +242,12 @@ function bindEvents() {
   els.dialog.addEventListener("cancel", closePicker);
   els.allDayInput.addEventListener("change", applyAllDayTime);
   els.typeInput.addEventListener("change", updateFormVisibility);
+  document.querySelectorAll("[data-type-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.typeInput.value = button.dataset.typeChoice;
+      updateFormVisibility();
+    });
+  });
   els.itemForm.addEventListener("submit", saveItem);
   els.deleteButton.addEventListener("click", deleteCurrentItem);
   document.querySelectorAll("[data-picker]").forEach((input) => {
@@ -184,6 +262,21 @@ function bindEvents() {
         event.preventDefault();
         openPicker(input);
       }
+    });
+  });
+  document.querySelectorAll(".time-editor-field").forEach((field) => {
+    field.addEventListener("click", () => openPicker(field.querySelector("[data-picker='time']")));
+  });
+  document.querySelectorAll(".date-editor-field").forEach((field) => {
+    field.addEventListener("click", () => openPicker(field.querySelector("[data-picker='date']")));
+  });
+  document.querySelectorAll(".editor-date-time-row").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest(".date-editor-field, .time-editor-field")) return;
+      const input = row.id === "endDateField" || event.offsetX > row.clientWidth * 0.62
+        ? row.querySelector("[data-picker='time']")
+        : row.querySelector("[data-picker='date']");
+      openPicker(input);
     });
   });
 
@@ -211,15 +304,6 @@ function bindEvents() {
       event.stopPropagation();
       handlePickerAction(pickerAction);
       return;
-    }
-
-    if (
-      state.picker &&
-      els.dialog.open &&
-      !event.target.closest("#pickerPanel") &&
-      !event.target.closest("[data-picker]")
-    ) {
-      closePicker();
     }
 
     const action = event.target.closest("[data-action]");
@@ -325,12 +409,10 @@ function bindEvents() {
       return;
     }
     if (action.dataset.action === "month-prev") {
-      state.visibleMonth = addMonths(state.visibleMonth, -1);
-      await loadItems();
+      await changeCalendarMonth(-1);
     }
     if (action.dataset.action === "month-next") {
-      state.visibleMonth = addMonths(state.visibleMonth, 1);
-      await loadItems();
+      await changeCalendarMonth(1);
     }
   });
 
@@ -390,10 +472,48 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarScheduleDrag);
   document.body.addEventListener("pointerup", finishCalendarScheduleDrag);
   document.body.addEventListener("pointercancel", cancelCalendarScheduleDrag);
+  document.body.addEventListener("pointerdown", startCalendarMonthSwipe);
+  document.body.addEventListener("pointermove", moveCalendarMonthSwipe);
+  document.body.addEventListener("pointerup", finishCalendarMonthSwipe);
+  document.body.addEventListener("pointercancel", cancelCalendarMonthSwipe);
   document.body.addEventListener("pointerdown", startCalendarSelection);
   document.body.addEventListener("pointermove", moveCalendarSelection);
   document.body.addEventListener("pointerup", finishCalendarSelection);
   document.body.addEventListener("pointercancel", cancelCalendarSelection);
+}
+
+function bindDialogButtonFeedback() {
+  document
+    .querySelectorAll("#itemDialog .dialog-text-button, .dialog-close-button")
+    .forEach((button) => {
+      button.addEventListener("pointerdown", () => setButtonPressed(button, true));
+      button.addEventListener("pointerup", () => setButtonPressed(button, false, 140));
+      button.addEventListener("pointerleave", () => setButtonPressed(button, false));
+      button.addEventListener("pointercancel", () => setButtonPressed(button, false));
+    });
+}
+
+function setButtonPressed(button, pressed, delay = 0) {
+  const existingTimer = buttonPressTimers.get(button);
+  if (existingTimer) window.clearTimeout(existingTimer);
+
+  if (pressed) {
+    button.classList.add("is-pressed");
+    buttonPressTimers.delete(button);
+    return;
+  }
+
+  const removePressed = () => {
+    button.classList.remove("is-pressed");
+    buttonPressTimers.delete(button);
+  };
+
+  if (delay > 0) {
+    buttonPressTimers.set(button, window.setTimeout(removePressed, delay));
+    return;
+  }
+
+  removePressed();
 }
 
 async function checkAuth() {
@@ -577,14 +697,8 @@ function timelineItemsForDate(date) {
 }
 
 function renderTimeline(schedules, context = "today") {
-  const slots = timeSlots();
-  const blocks = assignTimelineColumns(schedules.map((item) => timelineBlock(item, slots)).filter(Boolean));
-  const occupiedSlots = new Set();
-  blocks.forEach((block) => {
-    for (let index = block.startIndex; index < block.startIndex + block.span; index += 1) {
-      if (slots[index]) occupiedSlots.add(slots[index]);
-    }
-  });
+  const slots = timelineHourSlots();
+  const blocks = assignTimelineColumns(schedules.map(timelineBlock).filter(Boolean));
 
   const rows = slots.map((time, index) => {
     const body = "";
@@ -594,8 +708,15 @@ function renderTimeline(schedules, context = "today") {
     ].filter(Boolean).join(" ");
 
     return `
-      <div class="${classes}" data-time-slot="${time}" data-timeline-context="${context}" style="--slot-row:${index};">
-        <div class="slot-time">${time}</div>
+      <div
+        class="${classes}"
+        data-time-slot="${time}"
+        data-slot-start-minute="${index * TIMELINE_ROW_MINUTES}"
+        data-slot-end-minute="${(index + 1) * TIMELINE_ROW_MINUTES}"
+        data-timeline-context="${context}"
+        style="--slot-row:${index};"
+      >
+        <div class="slot-time">${formatTimelineHour(time)}</div>
         <div class="slot-body">${body}</div>
       </div>
     `;
@@ -625,9 +746,9 @@ function renderSchedulePill(block, context) {
       data-timeline-id="${item.id}"
       data-action="${cardAction}"
       data-id="${item.id}"
-      data-slot-start="${block.startIndex}"
-      data-slot-span="${block.span}"
-      style="--slot-start:${block.startIndex}; --slot-span:${block.span}; --slot-column:${block.columnIndex}; --slot-columns:${block.columnCount};"
+      data-slot-start="${block.startOffset}"
+      data-slot-span="${block.durationMinutes}"
+      style="--slot-start:${timelineOffsetUnits(block.startOffset)}; --slot-span:${timelineOffsetUnits(block.durationMinutes)}; --slot-column:${block.columnIndex}; --slot-columns:${block.columnCount};"
     >
       ${check}
       <button type="button" class="item-main-button">
@@ -648,7 +769,7 @@ function routineTimelineItem(routine) {
   return {
     ...routine,
     startTime: "08:00",
-    endTime: "08:30",
+    endTime: "09:00",
     timeUnset: true
   };
 }
@@ -658,7 +779,7 @@ function todoTimelineItem(todo) {
   return {
     ...todo,
     startTime: "08:00",
-    endTime: "08:30",
+    endTime: "09:00",
     timeUnset: true
   };
 }
@@ -675,20 +796,30 @@ function timelineItemDone(item) {
   return Boolean(item.completed);
 }
 
-function timelineBlock(item, slots) {
-  const startIndex = slots.indexOf(item.startTime);
-  if (startIndex === -1) return null;
+function timelineBlock(item) {
+  const startMinutes = isTimeString(item.startTime) ? timeToMinutes(item.startTime) : NaN;
+  if (!Number.isFinite(startMinutes)) return null;
 
-  const endTime = item.endTime && item.endTime > item.startTime
-    ? item.endTime
-    : nextTime(item.startTime);
-  let endIndex = endTime === "22:00" ? slots.length : slots.indexOf(endTime);
-  if (endIndex === -1 || endIndex <= startIndex) endIndex = startIndex + 1;
+  const fallbackEndMinutes = startMinutes + DEFAULT_ITEM_DURATION_MINUTES;
+  const endMinutes = item.endTime && isTimeString(item.endTime)
+    ? timeToMinutes(item.endTime)
+    : NaN;
+  const rawEndMinutes = Number.isFinite(endMinutes) && endMinutes > startMinutes
+    ? endMinutes
+    : fallbackEndMinutes;
+  const startOffset = timelineMinuteOffset(startMinutes);
+  const endOffset = timelineMinuteOffset(rawEndMinutes);
+  if (endOffset <= 0 || startOffset >= timelineTotalMinutes()) return null;
+
+  const visibleStartOffset = Math.max(0, startOffset);
+  const visibleEndOffset = Math.min(timelineTotalMinutes(), Math.max(endOffset, visibleStartOffset + 1));
 
   return {
     item,
-    startIndex,
-    span: Math.max(1, endIndex - startIndex)
+    startIndex: visibleStartOffset,
+    span: Math.max(1, visibleEndOffset - visibleStartOffset),
+    startOffset: visibleStartOffset,
+    durationMinutes: Math.max(1, visibleEndOffset - visibleStartOffset)
   };
 }
 
@@ -725,11 +856,9 @@ function renderCalendar() {
   els.calendarTab.innerHTML = `
     <section class="section">
       <div class="month-header">
-        <button type="button" data-action="month-prev">‹</button>
         <h2>${monthLabel}</h2>
-        <button type="button" data-action="month-next">›</button>
       </div>
-      <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount)}">
+      <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount, days.length / 7)}">
         ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
         ${days.map((day) => renderCalendarDay(day, scheduleRows)).join("")}
       </div>
@@ -737,26 +866,52 @@ function renderCalendar() {
   `;
 }
 
-function calendarZoomStyle(scheduleRowCount) {
+function calendarZoomStyle(scheduleRowCount, weekCount = 6) {
   const zoom = CALENDAR_ZOOM_MAX;
   const compact = window.matchMedia?.("(max-width: 430px)").matches;
-  const base = compact
-    ? { top: 23, row: 14, chip: 12, font: 8, gap: 4 }
-    : { top: 24, row: 15, chip: 13, font: 9, gap: 5 };
-  const rowHeight = roundCalendarZoomValue(base.row * zoom);
-  const dayHeight = roundCalendarZoomValue((base.top + scheduleRowCount * base.row) * zoom);
-  const chipHeight = roundCalendarZoomValue(Math.max(10, base.chip * zoom));
-  const chipFontSize = roundCalendarZoomValue(Math.max(8, base.font * zoom));
-  const gap = roundCalendarZoomValue(Math.max(3, base.gap * zoom));
+  const baseGap = compact ? 4 : 5;
+  const chipHeight = compact ? 15 : 15;
+  const chipFontSize = compact ? 8.5 : 9;
+  const rowHeight = chipHeight + 2;
+  const topHeight = compact ? 29 : 29;
+  const gap = roundCalendarZoomValue(Math.max(3, baseGap * zoom));
+  const minimumDayHeight = topHeight + scheduleRowCount * rowHeight;
+  const availableDayHeight = calendarAvailableDayHeight(weekCount, gap);
+  const dayHeight = Math.max(minimumDayHeight, availableDayHeight);
 
   return [
     `--schedule-row-count:${scheduleRowCount}`,
+    `--calendar-week-count:${weekCount}`,
     `--schedule-row-height:${rowHeight}px`,
     `--calendar-day-height:${dayHeight}px`,
     `--schedule-chip-height:${chipHeight}px`,
     `--schedule-chip-font-size:${chipFontSize}px`,
     `--calendar-gap:${gap}px`
   ].join(";");
+}
+
+function calendarAvailableDayHeight(weekCount, gap) {
+  const weeks = Math.max(1, Number(weekCount) || 6);
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
+  const calendarTop = els.calendarTab && !els.calendarTab.hidden
+    ? els.calendarTab.getBoundingClientRect().top
+    : 104;
+  const bottomNavTop = document.querySelector(".bottom-nav")?.getBoundingClientRect().top
+    || (viewportHeight - 72);
+  const compact = window.matchMedia?.("(max-width: 430px)").matches;
+  const sectionPadding = compact ? 4 : 6;
+  const sectionGap = compact ? 4 : 6;
+  const monthHeaderHeight = compact ? 26 : 28;
+  const weekdayHeight = compact ? 22 : 24;
+  const bottomBreathingRoom = 8;
+  const availableGridHeight = bottomNavTop
+    - calendarTop
+    - sectionPadding
+    - monthHeaderHeight
+    - sectionGap
+    - bottomBreathingRoom;
+  const availableDayRowsHeight = availableGridHeight - weekdayHeight - gap * weeks;
+  return Math.max(42, Math.floor(availableDayRowsHeight / weeks));
 }
 
 function roundCalendarZoomValue(value) {
@@ -775,19 +930,29 @@ function renderCalendarTimelineDialog() {
 
 function renderCalendarDay(day, scheduleRows = {}) {
   const schedules = itemsFor("일정", day.date).sort(byStartTime);
+  const mark = koreanCalendarMark(day.date);
   const isSelected = day.date === state.selectedDate;
   const classes = [
     "day-cell",
+    mark ? "has-calendar-mark" : "",
+    mark ? `calendar-mark-${mark.kind}` : "",
     day.inMonth ? "" : "muted",
     isSelected ? "selected" : ""
   ].filter(Boolean).join(" ");
 
   return `
     <button type="button" class="${classes}" data-action="select-date" data-date="${day.date}">
-      <span class="day-number">${Number(day.date.slice(8, 10))}</span>
+      <span class="day-head">
+        <span class="day-number">${Number(day.date.slice(8, 10))}</span>
+        ${mark ? `<span class="holiday-label">${escapeHtml(mark.label)}</span>` : ""}
+      </span>
       <span class="day-schedules">${renderCalendarScheduleChips(schedules, day.date, scheduleRows)}</span>
     </button>
   `;
+}
+
+function koreanCalendarMark(date) {
+  return KOREAN_CALENDAR_MARKS[date] || null;
 }
 
 function renderEmotionTab() {
@@ -1310,13 +1475,7 @@ function calendarScheduleRows(days) {
 
   const schedules = state.items
     .filter((item) => item.type === "일정" && isItemRangeOnCalendar(item, rangeStart, rangeEnd))
-    .sort((left, right) => {
-      const leftRange = selectedDateRange(left.date, left.endDate || left.date);
-      const rightRange = selectedDateRange(right.date, right.endDate || right.date);
-      return leftRange.startDate.localeCompare(rightRange.startDate) ||
-        rightRange.endDate.localeCompare(leftRange.endDate) ||
-        String(left.title || "").localeCompare(String(right.title || ""), "ko");
-    });
+    .sort(byCalendarScheduleOrder);
   const rows = {};
   const rowEndDates = [];
 
@@ -1329,6 +1488,20 @@ function calendarScheduleRows(days) {
   });
 
   return rows;
+}
+
+function byCalendarScheduleOrder(left, right) {
+  const leftRange = selectedDateRange(left.date, left.endDate || left.date);
+  const rightRange = selectedDateRange(right.date, right.endDate || right.date);
+  return leftRange.startDate.localeCompare(rightRange.startDate) ||
+    calendarScheduleTimeValue(left.startTime) - calendarScheduleTimeValue(right.startTime) ||
+    calendarScheduleTimeValue(left.endTime) - calendarScheduleTimeValue(right.endTime) ||
+    rightRange.endDate.localeCompare(leftRange.endDate) ||
+    String(left.title || "").localeCompare(String(right.title || ""), "ko");
+}
+
+function calendarScheduleTimeValue(time) {
+  return isTimeString(time) ? timeToMinutes(time) : 24 * 60;
 }
 
 function isItemRangeOnCalendar(item, startDate, endDate) {
@@ -1355,11 +1528,9 @@ function renderEmotionCalendar() {
   const monthLabel = state.visibleMonth.slice(0, 7);
 
   return `
-    <div class="month-header">
-      <button type="button" data-action="month-prev">‹</button>
-      <h2>${monthLabel}</h2>
-      <button type="button" data-action="month-next">›</button>
-    </div>
+      <div class="month-header">
+        <h2>${monthLabel}</h2>
+      </div>
     <div class="calendar-grid emotion-calendar">
       ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
       ${days.map(renderEmotionCalendarDay).join("")}
@@ -1538,10 +1709,12 @@ function openItemDialog(type, item, defaults = {}) {
   els.titleInput.value = item ? item.title : "";
   els.dateInput.value = item && item.date ? item.date : defaults.date || state.selectedDate;
   els.endDateInput.value = item && item.endDate ? item.endDate : defaults.endDate || defaults.date || state.selectedDate;
-  els.startTimeInput.value = item && item.startTime ? item.startTime : defaults.startTime || "08:00";
-  els.endTimeInput.value = item && item.endTime ? item.endTime : defaults.endTime || "08:30";
+  els.startTimeInput.value = item && item.startTime ? item.startTime : defaults.startTime || DEFAULT_START_TIME;
+  els.endTimeInput.value = item && item.endTime ? item.endTime : defaults.endTime || DEFAULT_END_TIME;
   els.noteInput.value = item && item.note ? item.note : "";
-  els.allDayInput.checked = selectedType === "일정" && els.startTimeInput.value === "08:00" && els.endTimeInput.value === "22:00";
+  els.allDayInput.checked = (selectedType === "일정" || selectedType === "할일")
+    && els.startTimeInput.value === FULL_DAY_START_TIME
+    && els.endTimeInput.value === FULL_DAY_END_TIME;
 
   document.querySelectorAll('[name="repeatDay"]').forEach((input) => {
     input.checked = Boolean(item && item.repeatDays && item.repeatDays.includes(input.value));
@@ -1568,26 +1741,54 @@ function openCalendarScheduleDialog(date) {
 function updateFormVisibility() {
   closePicker();
   const type = els.typeInput.value;
-  els.dateFields.hidden = type === "루틴";
-  els.endDateField.hidden = type !== "일정";
-  els.allDayField.hidden = type !== "일정";
-  els.scheduleFields.hidden = type !== "일정" && type !== "할일" && type !== "루틴";
+  const usesTime = type === "일정" || type === "할일" || type === "루틴";
+  syncTypeChoices(type);
+  els.dialog.dataset.itemType = type;
+  els.dateFields.hidden = !usesTime;
+  els.endDateField.hidden = !usesTime;
+  els.allDayField.hidden = type !== "일정" && type !== "할일";
+  els.scheduleFields.hidden = !usesTime;
   els.routineFields.hidden = type !== "루틴";
-  els.startTimeLabel.textContent = "시작";
-  els.endTimeLabel.textContent = type === "할일" ? "마감" : "종료";
-  if (type !== "일정") els.allDayInput.checked = false;
+  syncDateTimeFieldLabels(type);
+  if (type === "루틴") els.allDayInput.checked = false;
   applyAllDayTime();
 }
 
+function syncDateTimeFieldLabels(type) {
+  const startDateLabel = document.querySelector("#startDateLabel");
+  const endDateLabel = document.querySelector("#endDateLabel");
+  if (startDateLabel) startDateLabel.textContent = type === "일정" ? "시작일" : "날짜";
+  if (endDateLabel) endDateLabel.textContent = type === "일정" ? "마감일" : "날짜";
+
+  els.startTimeLabel.textContent = type === "일정" ? "시간선택" : "시작";
+  els.endTimeLabel.textContent = type === "일정"
+    ? "시간선택"
+    : type === "할일"
+      ? "마감"
+      : "종료";
+}
+
 function applyAllDayTime() {
-  const isAllDay = els.typeInput.value === "일정" && els.allDayInput.checked;
+  const isAllDay = (els.typeInput.value === "일정" || els.typeInput.value === "할일") && els.allDayInput.checked;
   if (isAllDay) {
-    els.startTimeInput.value = "08:00";
-    els.endTimeInput.value = "22:00";
+    els.startTimeInput.value = FULL_DAY_START_TIME;
+    els.endTimeInput.value = FULL_DAY_END_TIME;
     closePicker();
   }
   els.startTimeInput.disabled = isAllDay;
   els.endTimeInput.disabled = isAllDay;
+  syncTimeDisplays();
+}
+
+function syncTimeDisplays() {
+  if (els.startTimeDisplay) els.startTimeDisplay.textContent = formatKoreanTime(els.startTimeInput.value);
+  if (els.endTimeDisplay) els.endTimeDisplay.textContent = formatKoreanTime(els.endTimeInput.value);
+}
+
+function syncTypeChoices(type = els.typeInput.value) {
+  document.querySelectorAll("[data-type-choice]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.typeChoice === type);
+  });
 }
 
 function openPicker(input) {
@@ -1602,16 +1803,51 @@ function openPicker(input) {
     visibleMonth: type === "date" ? monthStart(selectedValue) : null
   };
 
-  const field = input.closest("label") || input;
-  field.after(els.pickerPanel);
+  els.dateFields.append(els.pickerPanel);
   renderPickerPanel();
 }
 
 function closePicker() {
   state.picker = null;
+  window.clearTimeout(state.timeWheelSettleTimer);
+  state.timeWheelSettleTimer = null;
+  state.timeWheelProgrammaticScroll = false;
   if (!els.pickerPanel) return;
   els.pickerPanel.hidden = true;
   els.pickerPanel.innerHTML = "";
+}
+
+function closePickerOnOutsidePointer(event) {
+  if (!state.picker || !els.dialog.open) return;
+  if (isPickerInteractiveTarget(event.target)) return;
+  closePicker();
+  armPickerOutsideClickSuppress();
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
+}
+
+function isPickerInteractiveTarget(target) {
+  return Boolean(target?.closest?.("#pickerPanel"));
+}
+
+function armPickerOutsideClickSuppress() {
+  state.suppressPickerOutsideClick = true;
+  window.clearTimeout(state.pickerOutsideClickTimer);
+  state.pickerOutsideClickTimer = window.setTimeout(() => {
+    state.suppressPickerOutsideClick = false;
+    state.pickerOutsideClickTimer = null;
+  }, 450);
+}
+
+function suppressPickerOutsideClick(event) {
+  if (!state.suppressPickerOutsideClick) return;
+  state.suppressPickerOutsideClick = false;
+  window.clearTimeout(state.pickerOutsideClickTimer);
+  state.pickerOutsideClickTimer = null;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
 }
 
 function renderPickerPanel() {
@@ -1620,6 +1856,7 @@ function renderPickerPanel() {
   els.pickerPanel.innerHTML = state.picker.type === "date"
     ? renderDatePicker()
     : renderTimePicker();
+  if (state.picker.type === "time") bindTimeWheelHaptics();
 }
 
 function renderDatePicker() {
@@ -1658,26 +1895,96 @@ function renderDatePicker() {
 
 function renderTimePicker() {
   const input = pickerTargetInput();
-  const selectedTime = input && isTimeString(input.value) ? input.value : defaultPickerValue(input);
   const options = pickerTimeOptions(input);
+  const selectedTime = nearestPickerTime(input && isTimeString(input.value) ? input.value : defaultPickerValue(input), options);
+  const periods = [...new Set(options.map((time) => timeParts(time).period))];
+  const periodOptions = periods.map((period) => ({
+    label: period,
+    time: timeForWheelPart(options, selectedTime, "period", period),
+    value: period
+  }));
+  const hourOptions = uniqueTimeHours(options).map((hour) => ({
+    label: String(hour.label),
+    time: timeForWheelPart(options, selectedTime, "hour", hour.hour24),
+    value: hour.hour24
+  }));
+  const minuteOptions = pickerMinuteValues().map((minute) => ({
+    label: minute,
+    time: timeForWheelPart(options, selectedTime, "minute", minute),
+    value: minute
+  }));
 
   return `
-    <div class="picker-header picker-header-simple">
-      <strong>${input && input.id === "endTimeInput" ? "종료 시간" : "시작 시간"}</strong>
-      <button type="button" class="picker-icon-button" data-picker-action="picker-close" aria-label="닫기">×</button>
+    <div class="picker-header picker-header-simple google-time-picker-header">
+      <strong>${timePickerTitle(input)}</strong>
+      <button type="button" class="dialog-text-button primary-text" data-picker-action="picker-close">완료</button>
     </div>
-    <div class="picker-time-grid">
-      ${options.map((time) => `
+    <div class="time-picker-current">${formatKoreanTime(selectedTime)}</div>
+    <div class="time-wheel" aria-label="시간 선택">
+      <div class="time-wheel-column" aria-label="오전 오후" data-wheel-kind="period" data-wheel-middle-copy="0">
+        ${renderLoopingTimeWheelOptions(periodOptions, selectedTime, 1, "period")}
+      </div>
+      <div class="time-wheel-column" aria-label="시" data-wheel-kind="hour" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
+        ${renderLoopingTimeWheelOptions(hourOptions, selectedTime, TIME_WHEEL_LOOP_COPIES, "hour")}
+      </div>
+      <div class="time-wheel-column" aria-label="분" data-wheel-kind="minute" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
+        ${renderLoopingTimeWheelOptions(minuteOptions, selectedTime, TIME_WHEEL_LOOP_COPIES, "minute")}
+      </div>
+    </div>
+  `;
+}
+
+function timePickerTitle(input) {
+  if (!input || input.id !== "endTimeInput") return "시작 시간";
+  return els.typeInput.value === "할일" ? "마감 시간" : "종료 시간";
+}
+
+function renderLoopingTimeWheelOptions(options, selectedTime, copyCount = 3, part = "") {
+  const selectedCopyIndex = middleWheelCopy(copyCount);
+  return Array.from({ length: copyCount }, (_, copyIndex) => options.map((option, optionIndex) => timeWheelButton(
+    option.label,
+    copyIndex === selectedCopyIndex && option.time === selectedTime,
+    option.time,
+    copyIndex,
+    optionIndex,
+    part,
+    option.value
+  )).join("")).join("");
+}
+
+function middleWheelCopy(copyCount) {
+  return Math.floor(Number(copyCount || 1) / 2);
+}
+
+function uniqueTimeHours(options) {
+  const seen = new Set();
+  return options
+    .map(timeParts)
+    .filter((parts) => {
+      if (seen.has(parts.hour24)) return false;
+      seen.add(parts.hour24);
+      return true;
+    })
+    .map((parts) => ({
+      hour24: parts.hour24,
+      label: parts.hour12
+    }));
+}
+
+function timeWheelButton(label, selected, time, copyIndex = 0, optionIndex = 0, part = "", value = "") {
+  return `
         <button
           type="button"
-          class="picker-time ${time === selectedTime ? "selected" : ""}"
+          class="time-wheel-option ${selected ? "selected" : ""}"
           data-picker-action="select-time"
           data-time="${time}"
+          data-wheel-part="${escapeHtml(part)}"
+          data-wheel-value="${escapeHtml(String(value))}"
+          data-wheel-copy="${copyIndex}"
+          data-wheel-index="${optionIndex}"
         >
-          ${time}
+          ${escapeHtml(label)}
         </button>
-      `).join("")}
-    </div>
   `;
 }
 
@@ -1685,7 +1992,7 @@ function handlePickerAction(action) {
   if (!state.picker) return;
 
   if (action.dataset.pickerAction === "picker-close") {
-    closePicker();
+    closePickerWithFeedback(action);
     return;
   }
 
@@ -1714,10 +2021,166 @@ function handlePickerAction(action) {
   }
 
   if (action.dataset.pickerAction === "select-time") {
-    input.value = action.dataset.time;
-    normalizeTimeRangeAfterPicker(input.id);
-    renderPickerPanel();
+    selectPickerTime(action.dataset.time);
   }
+}
+
+function closePickerWithFeedback(action) {
+  if (!action) {
+    closePicker();
+    return;
+  }
+  action.classList.add("is-pressed");
+  window.setTimeout(closePicker, 180);
+}
+
+function bindTimeWheelHaptics() {
+  els.pickerPanel.querySelectorAll(".time-wheel-column").forEach((column) => {
+    column.dataset.hapticIndex = "0";
+    column.addEventListener("wheel", handleTimeWheelWheel, { passive: false });
+    column.addEventListener("scroll", handleTimeWheelScroll, { passive: true });
+    column.addEventListener("scrollend", () => settleTimeWheelColumn(column), { passive: true });
+  });
+  window.requestAnimationFrame(centerSelectedTimeWheelOptions);
+}
+
+function handleTimeWheelWheel(event) {
+  if (!state.picker || state.picker.type !== "time") return;
+  const column = event.currentTarget;
+  const options = [...column.querySelectorAll(".time-wheel-option")];
+  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+  if (!options.length || !delta) return;
+
+  event.preventDefault();
+  window.clearTimeout(state.timeWheelSettleTimer);
+  const selectedIndex = options.findIndex((option) => option.classList.contains("selected"));
+  const nearest = nearestTimeWheelOption(column);
+  const currentIndex = selectedIndex >= 0 ? selectedIndex : nearest?.index || 0;
+  const direction = delta > 0 ? 1 : -1;
+  const nextIndex = (currentIndex + direction + options.length) % options.length;
+  const nextTime = timeForWheelOption(options[nextIndex]);
+  if (nextTime) selectPickerTime(nextTime);
+}
+
+function handleTimeWheelScroll(event) {
+  if (!state.picker || state.picker.type !== "time") return;
+  if (state.timeWheelProgrammaticScroll) return;
+  const column = event.currentTarget;
+  const nearest = nearestTimeWheelOption(column);
+  const nextIndex = nearest ? String(nearest.index) : "0";
+  if (column.dataset.hapticIndex !== nextIndex) {
+    column.dataset.hapticIndex = nextIndex;
+    triggerHaptic();
+  }
+  window.clearTimeout(state.timeWheelSettleTimer);
+  state.timeWheelSettleTimer = window.setTimeout(() => {
+    settleTimeWheelColumn(column);
+  }, TIME_WHEEL_SETTLE_DELAY_MS);
+}
+
+function settleTimeWheelColumn(column) {
+  if (!state.picker || state.picker.type !== "time" || !column.isConnected) return;
+  const nearest = nearestTimeWheelOption(column);
+  const input = pickerTargetInput();
+  if (!nearest || !input) return;
+
+  const time = timeForWheelOption(nearest.option);
+  if (!time || input.value === time) {
+    updateTimePickerSelection();
+    return;
+  }
+
+  selectPickerTime(time);
+}
+
+function selectPickerTime(time) {
+  const input = pickerTargetInput();
+  if (!input || !time) return;
+  triggerHaptic();
+  input.value = time;
+  normalizeTimeRangeAfterPicker(input.id);
+  syncTimeDisplays();
+  updateTimePickerSelection();
+}
+
+function updateTimePickerSelection() {
+  if (!state.picker || state.picker.type !== "time" || !els.pickerPanel || els.pickerPanel.hidden) return;
+  const input = pickerTargetInput();
+  if (!input) return;
+
+  const options = pickerTimeOptions(input);
+  const selectedTime = nearestPickerTime(isTimeString(input.value) ? input.value : defaultPickerValue(input), options);
+  const current = els.pickerPanel.querySelector(".time-picker-current");
+  if (current) current.textContent = formatKoreanTime(selectedTime);
+
+  els.pickerPanel.querySelectorAll(".time-wheel-option").forEach((option) => {
+    const part = option.dataset.wheelPart;
+    if (part === "period" || part === "hour" || part === "minute") {
+      option.dataset.time = timeForWheelOption(option, selectedTime, options);
+    }
+    const preferredCopy = optionWheelCopy(option) === middleWheelCopyForOption(option);
+    option.classList.toggle("selected", option.dataset.time === selectedTime && preferredCopy);
+  });
+
+  window.requestAnimationFrame(centerSelectedTimeWheelOptions);
+}
+
+function nearestTimeWheelOption(column) {
+  const options = [...column.querySelectorAll(".time-wheel-option")];
+  if (!options.length) return null;
+
+  const columnRect = column.getBoundingClientRect();
+  const centerY = columnRect.top + columnRect.height / 2;
+  return options.reduce((nearest, option, index) => {
+    const rect = option.getBoundingClientRect();
+    const distance = Math.abs(rect.top + rect.height / 2 - centerY);
+    if (!nearest || distance < nearest.distance) return { option, index, distance };
+    return nearest;
+  }, null);
+}
+
+function centerSelectedTimeWheelOptions() {
+  if (!state.picker || state.picker.type !== "time") return;
+  const columns = [...els.pickerPanel.querySelectorAll(".time-wheel-column")];
+  if (!columns.length) return;
+
+  state.timeWheelProgrammaticScroll = true;
+  columns.forEach((column) => {
+    const selected = column.querySelector(".time-wheel-option.selected") || nearestTimeWheelOption(column)?.option;
+    if (!selected) return;
+    centerTimeWheelOption(column, selected);
+    const nearest = nearestTimeWheelOption(column);
+    column.dataset.hapticIndex = nearest ? String(nearest.index) : "0";
+  });
+  window.setTimeout(() => {
+    state.timeWheelProgrammaticScroll = false;
+  }, TIME_WHEEL_SETTLE_DELAY_MS);
+}
+
+function optionWheelCopy(option) {
+  return Number(option?.dataset?.wheelCopy || 0);
+}
+
+function middleWheelCopyForOption(option) {
+  const column = option?.closest?.(".time-wheel-column");
+  return Number(column?.dataset?.wheelMiddleCopy || 0);
+}
+
+function centerTimeWheelOption(column, option) {
+  state.timeWheelProgrammaticScroll = true;
+  const targetTop = option.offsetTop - (column.clientHeight - option.offsetHeight) / 2;
+  column.scrollTop = Math.max(0, targetTop);
+  window.setTimeout(() => {
+    state.timeWheelProgrammaticScroll = false;
+  }, TIME_WHEEL_SETTLE_DELAY_MS);
+}
+
+function triggerHaptic(duration = HAPTIC_DURATION_MS) {
+  if (typeof navigator === "undefined" || !("vibrate" in navigator)) return;
+  const now = Date.now();
+  if (now - state.lastHapticAt < HAPTIC_MIN_INTERVAL_MS) return;
+  state.lastHapticAt = now;
+  navigator.vibrate(duration);
 }
 
 function pickerTargetInput() {
@@ -1729,13 +2192,92 @@ function pickerTargetInput() {
 function defaultPickerValue(input) {
   if (!input) return state.selectedDate;
   if (input.dataset.picker === "date") return state.selectedDate;
-  return input.id === "endTimeInput" ? "08:30" : "08:00";
+  return input.id === "endTimeInput" ? DEFAULT_END_TIME : DEFAULT_START_TIME;
 }
 
 function pickerTimeOptions(input) {
-  const slots = timeSlots();
-  if (input && input.id === "endTimeInput") return [...slots.slice(1), "22:00"];
-  return slots;
+  return minuteTimeSlots(Boolean(input && input.id === "endTimeInput"));
+}
+
+function pickerMinuteValues() {
+  return Array.from({ length: 60 / TIMELINE_TIME_STEP_MINUTES }, (_, index) =>
+    String(index * TIMELINE_TIME_STEP_MINUTES).padStart(2, "0")
+  );
+}
+
+function nearestPickerTime(time, options) {
+  if (options.includes(time)) return time;
+  return closestTime(options, time) || options[0] || DEFAULT_START_TIME;
+}
+
+function closestTime(options, time) {
+  if (!options.length) return "";
+  const target = timeToMinutes(time);
+  return options.reduce((closest, option) => {
+    return Math.abs(timeToMinutes(option) - target) < Math.abs(timeToMinutes(closest) - target)
+      ? option
+      : closest;
+  }, options[0]);
+}
+
+function timeForWheelPart(options, selectedTime, part, value) {
+  const selected = timeParts(selectedTime);
+  const candidates = options.filter((time) => {
+    const parts = timeParts(time);
+    if (part === "period") return parts.period === value;
+    if (part === "hour") return parts.hour24 === Number(value);
+    if (part === "minute") {
+      return parts.hour24 === selected.hour24
+        && parts.minute === value;
+    }
+    return false;
+  });
+
+  if (!candidates.length) return selectedTime;
+  if (candidates.includes(selectedTime)) return selectedTime;
+
+  const exact = candidates.find((time) => {
+    const parts = timeParts(time);
+    if (part === "period") return parts.hour12 === selected.hour12 && parts.minute === selected.minute;
+    if (part === "hour") return parts.minute === selected.minute;
+    return true;
+  });
+
+  return exact || closestTime(candidates, selectedTime);
+}
+
+function timeForWheelOption(option, selectedTime = "", options = null) {
+  if (!option) return "";
+  const input = pickerTargetInput();
+  const availableOptions = options || pickerTimeOptions(input);
+  const baseTime = selectedTime || (input && isTimeString(input.value) ? input.value : defaultPickerValue(input));
+  const normalizedBaseTime = nearestPickerTime(baseTime, availableOptions);
+  const part = option.dataset.wheelPart;
+  const value = option.dataset.wheelValue;
+
+  if (part === "minute") {
+    const selected = timeParts(normalizedBaseTime);
+    const minute = Number(value);
+    const selectedMinute = Number(selected.minute);
+    let nextTime = timeForWheelPart(availableOptions, normalizedBaseTime, "minute", value);
+    const copy = optionWheelCopy(option);
+    const selectedCopy = middleWheelCopyForOption(option);
+
+    if (copy > selectedCopy && minute < selectedMinute) {
+      nextTime = addMinutesToTime(nextTime, 60);
+    }
+    if (copy < selectedCopy && minute > selectedMinute) {
+      nextTime = addMinutesToTime(nextTime, -60);
+    }
+
+    return nearestPickerTime(clampTimelineTime(nextTime, input?.id === "endTimeInput"), availableOptions);
+  }
+
+  if (part === "period" || part === "hour") {
+    return timeForWheelPart(availableOptions, normalizedBaseTime, part, value);
+  }
+
+  return option.dataset.time || "";
 }
 
 function normalizeDateRangeAfterPicker(targetId) {
@@ -1751,21 +2293,28 @@ function normalizeDateRangeAfterPicker(targetId) {
 }
 
 function normalizeTimeRangeAfterPicker(targetId) {
-  const start = isTimeString(els.startTimeInput.value) ? els.startTimeInput.value : "08:00";
-  const end = isTimeString(els.endTimeInput.value) ? els.endTimeInput.value : nextTime(start);
-  els.startTimeInput.value = start;
-  els.endTimeInput.value = end;
+  const start = isTimeString(els.startTimeInput.value) ? els.startTimeInput.value : DEFAULT_START_TIME;
+  const end = isTimeString(els.endTimeInput.value) ? els.endTimeInput.value : addMinutesToTime(start, DEFAULT_ITEM_DURATION_MINUTES);
+  els.startTimeInput.value = clampTimelineTime(start, false);
+  els.endTimeInput.value = clampTimelineTime(end, true);
 
-  if (els.endTimeInput.value > els.startTimeInput.value) return;
+  if (timeToMinutes(els.endTimeInput.value) > timeToMinutes(els.startTimeInput.value)) return;
 
   if (targetId === "endTimeInput") {
-    els.startTimeInput.value = previousTime(els.endTimeInput.value) || "08:00";
+    els.startTimeInput.value = minutesToTime(Math.max(TIMELINE_START_MINUTES, timeToMinutes(els.endTimeInput.value) - DEFAULT_ITEM_DURATION_MINUTES));
+    if (timeToMinutes(els.startTimeInput.value) >= timeToMinutes(els.endTimeInput.value)) {
+      els.startTimeInput.value = minutesToTime(Math.max(TIMELINE_START_MINUTES, timeToMinutes(els.endTimeInput.value) - TIMELINE_TIME_STEP_MINUTES));
+    }
     return;
   }
 
-  els.endTimeInput.value = els.startTimeInput.value === "21:30"
-    ? "22:00"
-    : nextTime(els.startTimeInput.value);
+  els.endTimeInput.value = minutesToTime(Math.min(
+    TIMELINE_END_MINUTES,
+    timeToMinutes(els.startTimeInput.value) + DEFAULT_ITEM_DURATION_MINUTES
+  ));
+  if (timeToMinutes(els.endTimeInput.value) <= timeToMinutes(els.startTimeInput.value)) {
+    els.endTimeInput.value = minutesToTime(Math.min(TIMELINE_END_MINUTES, timeToMinutes(els.startTimeInput.value) + TIMELINE_TIME_STEP_MINUTES));
+  }
 }
 
 async function saveItem(event) {
@@ -1781,9 +2330,9 @@ async function saveItem(event) {
 
   if (type !== "루틴") payload.date = els.dateInput.value || state.selectedDate;
   if (type === "일정") payload.endDate = els.endDateInput.value || payload.date;
-  if (type === "일정" && els.allDayInput.checked) {
-    els.startTimeInput.value = "08:00";
-    els.endTimeInput.value = "22:00";
+  if ((type === "일정" || type === "할일") && els.allDayInput.checked) {
+    els.startTimeInput.value = FULL_DAY_START_TIME;
+    els.endTimeInput.value = FULL_DAY_END_TIME;
   }
   if (type === "일정" || type === "할일" || type === "루틴") {
     payload.startTime = els.startTimeInput.value;
@@ -2082,6 +2631,7 @@ function startTimelineItemResize(event) {
     originalSpan: span,
     targetStartIndex: startIndex,
     targetSpan: span,
+    originalMetaText: card.querySelector(".item-meta")?.textContent || "",
     startX: event.clientX,
     startY: event.clientY,
     moved: false
@@ -2100,8 +2650,9 @@ function moveTimelineItemResize(event) {
   state.timelineResize.moved = true;
   state.timelineResize.element.classList.add("resizing");
   updateTimelineResizeTarget(event);
-  state.timelineResize.element.style.setProperty("--slot-start", state.timelineResize.targetStartIndex);
-  state.timelineResize.element.style.setProperty("--slot-span", state.timelineResize.targetSpan);
+  state.timelineResize.element.style.setProperty("--slot-start", timelineOffsetUnits(state.timelineResize.targetStartIndex));
+  state.timelineResize.element.style.setProperty("--slot-span", timelineOffsetUnits(state.timelineResize.targetSpan));
+  updateTimelineResizeMeta();
   markTimelineResizeSlots();
   event.preventDefault();
 }
@@ -2125,9 +2676,8 @@ async function finishTimelineItemResize(event) {
   const item = findItem(resize.id);
   if (!item) return;
 
-  const slots = timeSlots();
-  const startTime = slots[targetStartIndex] || "08:00";
-  const endTime = slots[targetStartIndex + targetSpan] || "22:00";
+  const startTime = timelineOffsetToTime(targetStartIndex);
+  const endTime = timelineOffsetToTime(targetStartIndex + targetSpan);
 
   try {
     await updateTimelineItemTime(item, startTime, endTime);
@@ -2156,6 +2706,7 @@ function startTimelineItemDrag(event) {
     originalIndex: Number(card.dataset.slotStart || 0),
     targetIndex: Number(card.dataset.slotStart || 0),
     span: Number(card.dataset.slotSpan || 1),
+    originalMetaText: card.querySelector(".item-meta")?.textContent || "",
     startX: event.clientX,
     startY: event.clientY,
     offsetY: event.clientY - card.getBoundingClientRect().top,
@@ -2173,7 +2724,8 @@ function moveTimelineItemDrag(event) {
   state.timelineDrag.moved = true;
   state.timelineDrag.element.classList.add("dragging");
   state.timelineDrag.targetIndex = timelineDragTargetIndex(event);
-  state.timelineDrag.element.style.setProperty("--slot-start", state.timelineDrag.targetIndex);
+  state.timelineDrag.element.style.setProperty("--slot-start", timelineOffsetUnits(state.timelineDrag.targetIndex));
+  updateTimelineDragMeta();
   markTimelineDragSlots();
   event.preventDefault();
 }
@@ -2196,9 +2748,8 @@ async function finishTimelineItemDrag(event) {
   const item = findItem(drag.id);
   if (!item) return;
 
-  const slots = timeSlots();
-  const startTime = slots[targetIndex] || item.startTime || "08:00";
-  const endTime = slots[targetIndex + drag.span] || "22:00";
+  const startTime = timelineOffsetToTime(targetIndex);
+  const endTime = timelineOffsetToTime(targetIndex + drag.span);
 
   try {
     await updateTimelineItemTime(item, startTime, endTime);
@@ -2243,30 +2794,31 @@ async function updateTimelineItemTime(item, startTime, endTime) {
 
 function timelineDragTargetIndex(event) {
   const drag = state.timelineDrag;
-  const slots = timeSlots();
   const slotHeight = parseFloat(getComputedStyle(drag.timeline).getPropertyValue("--slot-height")) || 56;
   const top = drag.timeline.getBoundingClientRect().top;
-  const rawIndex = Math.round((event.clientY - top - drag.offsetY) / slotHeight);
-  const maxIndex = Math.max(0, slots.length - drag.span);
+  const rawIndex = snapTimelineMinutes(((event.clientY - top - drag.offsetY) / slotHeight) * TIMELINE_ROW_MINUTES);
+  const maxIndex = Math.max(0, timelineTotalMinutes() - drag.span);
   return Math.max(0, Math.min(maxIndex, rawIndex));
 }
 
 function updateTimelineResizeTarget(event) {
   const resize = state.timelineResize;
-  const slots = timeSlots();
   const slotHeight = parseFloat(getComputedStyle(resize.timeline).getPropertyValue("--slot-height")) || 56;
   const top = resize.timeline.getBoundingClientRect().top;
-  const rawIndex = Math.round((event.clientY - top) / slotHeight);
+  const rawIndex = snapTimelineMinutes(((event.clientY - top) / slotHeight) * TIMELINE_ROW_MINUTES);
   const originalEndIndex = resize.originalStartIndex + resize.originalSpan;
 
   if (resize.edge === "start") {
-    const nextStartIndex = Math.max(0, Math.min(originalEndIndex - 1, rawIndex));
+    const nextStartIndex = Math.max(0, Math.min(originalEndIndex - TIMELINE_TIME_STEP_MINUTES, rawIndex));
     resize.targetStartIndex = nextStartIndex;
     resize.targetSpan = originalEndIndex - nextStartIndex;
     return;
   }
 
-  const nextEndIndex = Math.max(resize.originalStartIndex + 1, Math.min(slots.length, rawIndex));
+  const nextEndIndex = Math.max(
+    resize.originalStartIndex + TIMELINE_TIME_STEP_MINUTES,
+    Math.min(timelineTotalMinutes(), rawIndex)
+  );
   resize.targetStartIndex = resize.originalStartIndex;
   resize.targetSpan = nextEndIndex - resize.originalStartIndex;
 }
@@ -2276,8 +2828,8 @@ function markTimelineDragSlots() {
   if (!state.timelineDrag) return;
 
   const { targetIndex, span, timeline } = state.timelineDrag;
-  timeline.querySelectorAll("[data-time-slot]").forEach((slot, index) => {
-    if (index >= targetIndex && index < targetIndex + span) {
+  timeline.querySelectorAll("[data-time-slot]").forEach((slot) => {
+    if (timeRangesOverlap(targetIndex, targetIndex + span, Number(slot.dataset.slotStartMinute), Number(slot.dataset.slotEndMinute))) {
       slot.classList.add("drag-target");
     }
   });
@@ -2288,8 +2840,8 @@ function markTimelineResizeSlots() {
   if (!state.timelineResize) return;
 
   const { targetStartIndex, targetSpan, timeline } = state.timelineResize;
-  timeline.querySelectorAll("[data-time-slot]").forEach((slot, index) => {
-    if (index >= targetStartIndex && index < targetStartIndex + targetSpan) {
+  timeline.querySelectorAll("[data-time-slot]").forEach((slot) => {
+    if (timeRangesOverlap(targetStartIndex, targetStartIndex + targetSpan, Number(slot.dataset.slotStartMinute), Number(slot.dataset.slotEndMinute))) {
       slot.classList.add("drag-target");
     }
   });
@@ -2301,8 +2853,12 @@ function clearTimelineDragSlots() {
 
 function clearTimelineDragState(restorePosition) {
   if (!state.timelineDrag) return;
-  const { element, originalIndex } = state.timelineDrag;
-  if (restorePosition) element.style.setProperty("--slot-start", originalIndex);
+  const { element, originalIndex, originalMetaText } = state.timelineDrag;
+  if (restorePosition) {
+    element.style.setProperty("--slot-start", timelineOffsetUnits(originalIndex));
+    const meta = element.querySelector(".item-meta");
+    if (meta) meta.textContent = originalMetaText;
+  }
   element.classList.remove("dragging");
   clearTimelineDragSlots();
   state.timelineDrag = null;
@@ -2310,14 +2866,34 @@ function clearTimelineDragState(restorePosition) {
 
 function clearTimelineResizeState(restorePosition) {
   if (!state.timelineResize) return;
-  const { element, originalStartIndex, originalSpan } = state.timelineResize;
+  const { element, originalStartIndex, originalSpan, originalMetaText } = state.timelineResize;
   if (restorePosition) {
-    element.style.setProperty("--slot-start", originalStartIndex);
-    element.style.setProperty("--slot-span", originalSpan);
+    element.style.setProperty("--slot-start", timelineOffsetUnits(originalStartIndex));
+    element.style.setProperty("--slot-span", timelineOffsetUnits(originalSpan));
+    const meta = element.querySelector(".item-meta");
+    if (meta) meta.textContent = originalMetaText;
   }
   element.classList.remove("resizing");
   clearTimelineDragSlots();
   state.timelineResize = null;
+}
+
+function updateTimelineDragMeta() {
+  if (!state.timelineDrag) return;
+  const { element, targetIndex, span } = state.timelineDrag;
+  const meta = element.querySelector(".item-meta");
+  if (meta) meta.textContent = timelineRangeText(targetIndex, span);
+}
+
+function updateTimelineResizeMeta() {
+  if (!state.timelineResize) return;
+  const { element, targetStartIndex, targetSpan } = state.timelineResize;
+  const meta = element.querySelector(".item-meta");
+  if (meta) meta.textContent = timelineRangeText(targetStartIndex, targetSpan);
+}
+
+function timelineRangeText(startIndex, span) {
+  return `${timelineOffsetToTime(startIndex)} - ${timelineOffsetToTime(startIndex + span)}`;
 }
 
 function selectCalendarSchedule(id, date) {
@@ -2510,6 +3086,142 @@ function clearCalendarScheduleDragState() {
   state.calendarScheduleDrag = null;
 }
 
+function startCalendarMonthSwipe(event) {
+  if (state.tab !== "calendar") return;
+  const grid = event.target.closest(".schedule-calendar");
+  if (
+    !grid ||
+    event.target.closest(".schedule-chip, [data-calendar-resize-edge]") ||
+    state.calendarScheduleDrag ||
+    state.calendarScheduleResize
+  ) return;
+
+  state.calendarMonthSwipe = {
+    pointerId: event.pointerId,
+    grid,
+    startX: event.clientX,
+    startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
+    horizontal: false,
+    captured: false,
+    cancelled: false
+  };
+  resetCalendarMonthSwipeVisual(grid, true);
+}
+
+function moveCalendarMonthSwipe(event) {
+  if (!state.calendarMonthSwipe || state.calendarMonthSwipe.pointerId !== event.pointerId) return;
+
+  const swipe = state.calendarMonthSwipe;
+  swipe.currentX = event.clientX;
+  swipe.currentY = event.clientY;
+
+  const dx = swipe.currentX - swipe.startX;
+  const dy = swipe.currentY - swipe.startY;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+
+  if (!swipe.horizontal && absY > 24 && absY > absX) {
+    swipe.cancelled = true;
+    return;
+  }
+
+  if (absX > 18 && absX > absY * CALENDAR_MONTH_SWIPE_RATIO) {
+    swipe.horizontal = true;
+    if (!swipe.captured) {
+      try {
+        swipe.grid?.setPointerCapture?.(event.pointerId);
+        swipe.captured = true;
+      } catch {
+        // Pointer capture can fail when the browser does not consider the pointer active.
+      }
+    }
+    updateCalendarMonthSwipeVisual(swipe.grid, dx);
+    event.preventDefault();
+  }
+}
+
+async function finishCalendarMonthSwipe(event) {
+  if (!state.calendarMonthSwipe || state.calendarMonthSwipe.pointerId !== event.pointerId) return;
+
+  const swipe = state.calendarMonthSwipe;
+  state.calendarMonthSwipe = null;
+
+  if (swipe.cancelled) return;
+
+  const dx = swipe.currentX - swipe.startX;
+  const dy = swipe.currentY - swipe.startY;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+
+  if (absX < CALENDAR_MONTH_SWIPE_DISTANCE || absX <= absY * CALENDAR_MONTH_SWIPE_RATIO) {
+    resetCalendarMonthSwipeVisual(swipe.grid);
+    return;
+  }
+
+  suppressCalendarGestureClicks();
+  commitCalendarMonthSwipeVisual(swipe.grid, dx);
+  await wait(130);
+  await changeCalendarMonth(dx > 0 ? -1 : 1);
+}
+
+function cancelCalendarMonthSwipe() {
+  if (state.calendarMonthSwipe?.grid) resetCalendarMonthSwipeVisual(state.calendarMonthSwipe.grid);
+  state.calendarMonthSwipe = null;
+}
+
+function updateCalendarMonthSwipeVisual(grid, dx) {
+  if (!grid) return;
+  const visualX = Math.max(-CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, Math.min(CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, dx * 0.42));
+  grid.classList.add("month-swiping");
+  grid.classList.remove("month-swipe-commit");
+  grid.style.setProperty("--calendar-swipe-x", `${Math.round(visualX)}px`);
+}
+
+function resetCalendarMonthSwipeVisual(grid, immediate = false) {
+  if (!grid) return;
+  grid.classList.toggle("month-swiping", Boolean(immediate));
+  grid.classList.remove("month-swipe-commit");
+  grid.style.setProperty("--calendar-swipe-x", "0px");
+  if (!immediate) {
+    window.setTimeout(() => {
+      grid.classList.remove("month-swiping");
+    }, 190);
+  }
+}
+
+function commitCalendarMonthSwipeVisual(grid, dx) {
+  if (!grid) return;
+  grid.classList.remove("month-swiping");
+  grid.classList.add("month-swipe-commit");
+  const direction = dx > 0 ? 1 : -1;
+  grid.style.setProperty("--calendar-swipe-x", `${direction * CALENDAR_MONTH_SWIPE_VISUAL_LIMIT}px`);
+}
+
+async function changeCalendarMonth(delta) {
+  if (!delta || state.loading) return;
+  state.visibleMonth = addMonths(state.visibleMonth, delta);
+  state.selectedCalendarSchedule = null;
+  clearSelectedTimelineRange();
+  await loadItems();
+}
+
+function suppressCalendarGestureClicks() {
+  state.suppressCalendarClick = true;
+  state.suppressCalendarScheduleClick = true;
+  window.setTimeout(() => {
+    state.suppressCalendarClick = false;
+    state.suppressCalendarScheduleClick = false;
+  }, 280);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function startCalendarZoomGesture(event) {
   if (state.tab !== "calendar") return;
   const grid = event.target.closest(".schedule-calendar");
@@ -2594,15 +3306,6 @@ function calendarZoomGestureDistance(gesture) {
 
   const [first, second] = points;
   return Math.hypot(second.x - first.x, second.y - first.y);
-}
-
-function suppressCalendarGestureClicks() {
-  state.suppressCalendarClick = true;
-  state.suppressCalendarScheduleClick = true;
-  window.setTimeout(() => {
-    state.suppressCalendarClick = false;
-    state.suppressCalendarScheduleClick = false;
-  }, 280);
 }
 
 function updateCalendarScheduleResizeTarget(event) {
@@ -2855,7 +3558,7 @@ function openSelectedTimelineDialog(selection) {
 }
 
 function selectedTimeRange(firstTime, secondTime) {
-  const times = timeSlots();
+  const times = timelineHourSlots();
   const firstIndex = times.indexOf(firstTime);
   const secondIndex = times.indexOf(secondTime);
   const startIndex = Math.max(0, Math.min(firstIndex, secondIndex));
@@ -2863,7 +3566,7 @@ function selectedTimeRange(firstTime, secondTime) {
 
   return {
     startTime: times[startIndex] || firstTime,
-    endTime: nextTime(times[endIndex - 1] || secondTime)
+    endTime: addMinutesToTime(times[endIndex - 1] || secondTime, TIMELINE_ROW_MINUTES)
   };
 }
 
@@ -2875,16 +3578,12 @@ function selectedDateRange(firstDate, secondDate) {
 }
 
 function nextTime(time) {
-  const [hour, minute] = time.split(":").map(Number);
-  const date = new Date(2000, 0, 1, hour, minute + 30, 0);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return addMinutesToTime(time, 30);
 }
 
 function previousTime(time) {
-  const [hour, minute] = time.split(":").map(Number);
-  const date = new Date(2000, 0, 1, hour, minute - 30, 0);
-  const value = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  return value >= "08:00" && value < "22:00" ? value : "";
+  const value = addMinutesToTime(time, -30);
+  return timeToMinutes(value) >= TIMELINE_START_MINUTES && timeToMinutes(value) < TIMELINE_END_MINUTES ? value : "";
 }
 
 function isDateString(value) {
@@ -2892,7 +3591,89 @@ function isDateString(value) {
 }
 
 function isTimeString(value) {
-  return /^\d{2}:\d{2}$/.test(String(value || ""));
+  const match = String(value || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) return false;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return false;
+  return (hour >= 0 && hour < 24) || (hour === 24 && minute === 0);
+}
+
+function timeParts(time) {
+  const [hour, minute] = time.split(":").map(Number);
+  if (hour === 24 && minute === 0) {
+    return {
+      period: "오전",
+      hour24: 24,
+      hour12: 12,
+      minute: "00"
+    };
+  }
+
+  return {
+    period: hour < 12 ? "오전" : "오후",
+    hour24: hour,
+    hour12: hour % 12 || 12,
+    minute: String(minute).padStart(2, "0")
+  };
+}
+
+function formatKoreanTime(time) {
+  if (!isTimeString(time)) return "";
+  if (time === FULL_DAY_END_TIME) return FULL_DAY_END_TIME;
+  const parts = timeParts(time);
+  return `${parts.period} ${parts.hour12}:${parts.minute}`;
+}
+
+function timeToMinutes(time) {
+  if (!isTimeString(time)) return 0;
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function minutesToTime(minutes) {
+  const normalized = Math.max(0, Math.min(24 * 60, Math.round(minutes)));
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function addMinutesToTime(time, minutes) {
+  return minutesToTime(timeToMinutes(time) + minutes);
+}
+
+function timelineTotalMinutes() {
+  return TIMELINE_END_MINUTES - TIMELINE_START_MINUTES;
+}
+
+function timelineMinuteOffset(minutes) {
+  return minutes - TIMELINE_START_MINUTES;
+}
+
+function timelineOffsetToTime(offset) {
+  return minutesToTime(Math.max(TIMELINE_START_MINUTES, Math.min(TIMELINE_END_MINUTES, TIMELINE_START_MINUTES + Math.round(offset))));
+}
+
+function timelineOffsetUnits(minutes) {
+  return Math.round((Number(minutes || 0) / TIMELINE_ROW_MINUTES) * 10000) / 10000;
+}
+
+function snapTimelineMinutes(minutes) {
+  return Math.round(Number(minutes || 0) / TIMELINE_TIME_STEP_MINUTES) * TIMELINE_TIME_STEP_MINUTES;
+}
+
+function clampTimelineTime(time, allowEnd) {
+  const maxMinutes = allowEnd ? TIMELINE_END_MINUTES : TIMELINE_END_MINUTES - TIMELINE_TIME_STEP_MINUTES;
+  return minutesToTime(Math.max(TIMELINE_START_MINUTES, Math.min(maxMinutes, timeToMinutes(time))));
+}
+
+function timeRangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+  return Number.isFinite(leftStart)
+    && Number.isFinite(leftEnd)
+    && Number.isFinite(rightStart)
+    && Number.isFinite(rightEnd)
+    && leftStart < rightEnd
+    && rightStart < leftEnd;
 }
 
 async function saveEmotion(nextEmotion) {
@@ -3008,6 +3789,7 @@ function setTab(tab) {
   state.tab = tab;
   state.lastCalendarClick = null;
   state.lastEmotionClick = null;
+  state.calendarMonthSwipe = null;
   if (changed) {
     state.selectedDate = today;
     state.visibleMonth = monthStart(today);
@@ -3059,8 +3841,12 @@ function applyCalendarZoomToDom() {
     grid.style.getPropertyValue("--schedule-row-count") ||
     getComputedStyle(grid).getPropertyValue("--schedule-row-count")
   ) || 2;
+  const weekCount = Number(
+    grid.style.getPropertyValue("--calendar-week-count") ||
+    getComputedStyle(grid).getPropertyValue("--calendar-week-count")
+  ) || 6;
 
-  calendarZoomStyle(scheduleRowCount).split(";").forEach((rule) => {
+  calendarZoomStyle(scheduleRowCount, weekCount).split(";").forEach((rule) => {
     const [property, value] = rule.split(":");
     if (!property || !value) return;
     grid.style.setProperty(property.trim(), value.trim());
@@ -3172,13 +3958,32 @@ function queryRange() {
   return { start, end };
 }
 
-function timeSlots() {
+function timelineHourSlots() {
   const slots = [];
-  for (let hour = 8; hour < 22; hour += 1) {
-    slots.push(`${String(hour).padStart(2, "0")}:00`);
-    slots.push(`${String(hour).padStart(2, "0")}:30`);
+  for (let minutes = TIMELINE_START_MINUTES; minutes < TIMELINE_END_MINUTES; minutes += TIMELINE_ROW_MINUTES) {
+    slots.push(minutesToTime(minutes));
   }
   return slots;
+}
+
+function minuteTimeSlots(allowEnd) {
+  const start = allowEnd ? TIMELINE_START_MINUTES + TIMELINE_TIME_STEP_MINUTES : TIMELINE_START_MINUTES;
+  const end = allowEnd ? TIMELINE_END_MINUTES : TIMELINE_END_MINUTES - TIMELINE_TIME_STEP_MINUTES;
+  const slots = [];
+  for (let minutes = start; minutes <= end; minutes += TIMELINE_TIME_STEP_MINUTES) {
+    slots.push(minutesToTime(minutes));
+  }
+  return slots;
+}
+
+function timeSlots() {
+  return timelineHourSlots();
+}
+
+function formatTimelineHour(time) {
+  if (!isTimeString(time)) return "";
+  const parts = timeParts(time);
+  return `${parts.period} ${parts.hour12}시`;
 }
 
 function calendarDays(monthDate) {

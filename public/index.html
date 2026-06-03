@@ -93,15 +93,16 @@
     </main>
 
     <dialog id="itemDialog">
-      <form id="itemForm" method="dialog" class="dialog-body">
-        <div class="dialog-header">
+      <form id="itemForm" method="dialog" class="dialog-body item-dialog-body">
+        <div class="dialog-header item-dialog-header">
+          <button type="button" id="closeDialogButton" class="dialog-text-button">취소</button>
           <h2 id="dialogTitle">추가</h2>
-          <button type="button" id="closeDialogButton" class="icon-button" title="닫기">×</button>
+          <button type="submit" class="dialog-text-button primary-text">저장</button>
         </div>
 
         <input id="editingId" type="hidden">
 
-        <label>
+        <label class="native-type-field">
           유형
           <select id="typeInput" required>
             <option value="일정">일정</option>
@@ -110,42 +111,59 @@
           </select>
         </label>
 
-        <label>
-          제목
-          <input id="titleInput" type="text" maxlength="80" required>
+        <label class="title-field">
+          <input id="titleInput" type="text" maxlength="80" placeholder="제목 추가" required>
         </label>
 
-        <div id="dateFields">
-          <div class="field-grid">
-            <label>
-              날짜
-              <input id="dateInput" type="text" inputmode="none" readonly data-picker="date">
-            </label>
-            <label id="endDateField">
-              종료일
-              <input id="endDateInput" type="text" inputmode="none" readonly data-picker="date">
-            </label>
+        <div class="type-segment" aria-label="유형">
+          <button type="button" data-type-choice="일정">일정</button>
+          <button type="button" data-type-choice="할일">할 일</button>
+          <button type="button" data-type-choice="루틴">루틴</button>
+        </div>
+
+        <div class="editor-card">
+          <label id="allDayField" class="editor-row all-day-row">
+            <span class="editor-icon" aria-hidden="true">◷</span>
+            <span class="editor-label">종일</span>
+            <span class="switch-control">
+              <input id="allDayInput" type="checkbox">
+              <span></span>
+            </span>
+          </label>
+
+        <div id="dateFields" class="editor-date-fields">
+          <div id="scheduleFields" class="editor-date-time-fields">
+            <div class="editor-date-time-row start-date-time-row">
+              <span class="editor-icon" aria-hidden="true">◷</span>
+              <label class="date-editor-field">
+                <span id="startDateLabel">시작일</span>
+                <input id="dateInput" type="text" inputmode="none" readonly data-picker="date">
+              </label>
+              <label class="time-editor-field">
+                <span id="startTimeLabel" class="time-editor-label">시간선택</span>
+                <input id="startTimeInput" type="text" inputmode="none" readonly data-picker="time">
+                <span id="startTimeDisplay" class="time-editor-value" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div id="endDateField" class="editor-date-time-row end-date-time-row">
+              <span class="editor-icon" aria-hidden="true"></span>
+              <label class="date-editor-field">
+                <span id="endDateLabel">마감일</span>
+                <input id="endDateInput" type="text" inputmode="none" readonly data-picker="date">
+              </label>
+              <label class="time-editor-field">
+                <span id="endTimeLabel" class="time-editor-label">시간선택</span>
+                <input id="endTimeInput" type="text" inputmode="none" readonly data-picker="time">
+                <span id="endTimeDisplay" class="time-editor-value" aria-hidden="true"></span>
+              </label>
+            </div>
           </div>
         </div>
 
-        <div id="scheduleFields" class="field-grid">
-          <label id="allDayField" class="inline-check field-wide">
-            <input id="allDayInput" type="checkbox">
-            <span>종일</span>
-          </label>
-          <label>
-            <span id="startTimeLabel">시작</span>
-            <input id="startTimeInput" type="text" inputmode="none" readonly data-picker="time">
-          </label>
-          <label>
-            <span id="endTimeLabel">종료</span>
-            <input id="endTimeInput" type="text" inputmode="none" readonly data-picker="time">
-          </label>
+        <div id="pickerPanel" class="picker-panel" hidden></div>
         </div>
 
-        <div id="pickerPanel" class="picker-panel" hidden></div>
-
-        <div id="routineFields">
+        <div id="routineFields" class="editor-card">
           <p class="field-label">반복요일</p>
           <div class="chips">
             <label><input type="checkbox" name="repeatDay" value="월">월</label>
@@ -158,14 +176,13 @@
           </div>
         </div>
 
-        <label>
+        <label class="note-field">
           메모
           <textarea id="noteInput" rows="3" maxlength="2000"></textarea>
         </label>
 
         <div class="dialog-actions">
           <button type="button" id="deleteButton" class="danger" hidden>삭제</button>
-          <button type="submit" class="primary">저장</button>
         </div>
       </form>
     </dialog>
@@ -174,7 +191,7 @@
       <div class="dialog-body">
         <div class="dialog-header">
           <h2 id="emotionDialogTitle">챌린지</h2>
-          <button type="button" id="closeEmotionDialogButton" class="icon-button" title="닫기">×</button>
+          <button type="button" id="closeEmotionDialogButton" class="icon-button dialog-close-button" title="닫기">×</button>
         </div>
         <div id="emotionDialogContent" class="emotion-dialog-content"></div>
       </div>
@@ -184,7 +201,7 @@
       <div class="dialog-body">
         <div class="dialog-header">
           <h2 id="calendarTimelineTitle">시간표</h2>
-          <button type="button" id="closeCalendarTimelineDialogButton" class="icon-button" title="닫기">×</button>
+          <button type="button" id="closeCalendarTimelineDialogButton" class="icon-button dialog-close-button" title="닫기">×</button>
         </div>
         <div id="calendarTimelineContent" class="calendar-timeline-content"></div>
       </div>

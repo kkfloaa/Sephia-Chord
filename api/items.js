@@ -295,8 +295,8 @@ function sanitizePayload(input, isPatch) {
   if (input.type !== undefined && allowedTypes.has(input.type)) body.type = input.type;
   if (input.date !== undefined && isDate(input.date)) body.date = input.date;
   if (input.endDate !== undefined && isDate(input.endDate)) body.endDate = input.endDate;
-  if (input.startTime !== undefined && isTime(input.startTime)) body.startTime = input.startTime;
-  if (input.endTime !== undefined && isTime(input.endTime)) body.endTime = input.endTime;
+  if (input.startTime !== undefined && isTime(input.startTime, false)) body.startTime = input.startTime;
+  if (input.endTime !== undefined && isTime(input.endTime, true)) body.endTime = input.endTime;
   if (input.completed !== undefined) body.completed = Boolean(input.completed);
   if (input.status !== undefined && allowedStatuses.has(input.status)) body.status = input.status;
   const hasEmotionInput = input.emotion !== undefined || input.mood !== undefined;
@@ -347,8 +347,13 @@ function isDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value));
 }
 
-function isTime(value) {
-  return /^\d{2}:\d{2}$/.test(String(value));
+function isTime(value, allowEndOfDay) {
+  const match = String(value).match(/^(\d{2}):(\d{2})$/);
+  if (!match) return false;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return false;
+  return (hour >= 0 && hour < 24) || (allowEndOfDay && hour === 24 && minute === 0);
 }
 
 function normalizeEmotionValue(value) {
