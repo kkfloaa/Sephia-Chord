@@ -31,6 +31,7 @@ const state = {
   suppressCalendarScheduleClick: false,
   suppressCalendarClick: false,
   lastCalendarClick: null,
+  lastCalendarScheduleTap: null,
   calendarSelectedDate: null,
   selectedEmotionDate: null,
   selectedChallengeLayer: null,
@@ -62,6 +63,8 @@ const TIMELINE_START_MINUTES = 0;
 const TIMELINE_END_MINUTES = 24 * 60;
 const TIMELINE_ROW_MINUTES = 60;
 const TIMELINE_TIME_STEP_MINUTES = 5;
+const TIMELINE_MANIPULATION_STEP_MINUTES = 30;
+const TIMELINE_RESIZE_MIN_MINUTES = 60;
 const DEFAULT_ITEM_DURATION_MINUTES = 60;
 const FULL_DAY_START_TIME = "00:00";
 const FULL_DAY_END_TIME = "24:00";
@@ -406,6 +409,12 @@ function bindEvents() {
     }
     if (action.dataset.action === "select-calendar-schedule") {
       event.stopPropagation();
+      const isSelected = selectedCalendarScheduleMatches(id);
+      const isDoubleTap = registerCalendarScheduleTap(id) || event.detail > 1;
+      if (isSelected && isDoubleTap) {
+        await deleteCalendarSchedule(id);
+        return;
+      }
       selectCalendarSchedule(id, action.dataset.date);
       return;
     }
@@ -493,6 +502,14 @@ function bindEvents() {
   });
 
   document.body.addEventListener("dblclick", async (event) => {
+    const scheduleChip = event.target.closest(".schedule-chip[data-action='select-calendar-schedule']");
+    if (scheduleChip && selectedCalendarScheduleMatches(scheduleChip.dataset.id)) {
+      event.preventDefault();
+      event.stopPropagation();
+      await deleteCalendarSchedule(scheduleChip.dataset.id);
+      return;
+    }
+
     const card = event.target.closest(".timeline-item");
     if (card && !event.target.closest(".checkbox, .edit-button") && canSelectTimelineItem(findItem(card.dataset.timelineId))) {
       event.preventDefault();
@@ -3338,14 +3355,14 @@ function updateTimelineResizeTarget(event) {
   const originalEndIndex = resize.originalStartIndex + resize.originalSpan;
 
   if (resize.edge === "start") {
-    const nextStartIndex = Math.max(0, Math.min(originalEndIndex - TIMELINE_TIME_STEP_MINUTES, rawIndex));
+    const nextStartIndex = Math.max(0, Math.min(originalEndIndex - TIMELINE_RESIZE_MIN_MINUTES, rawIndex));
     resize.targetStartIndex = nextStartIndex;
     resize.targetSpan = originalEndIndex - nextStartIndex;
     return;
   }
 
   const nextEndIndex = Math.max(
-    resize.originalStartIndex + TIMELINE_TIME_STEP_MINUTES,
+    resize.originalStartIndex + TIMELINE_RESIZE_MIN_MINUTES,
     Math.min(timelineTotalMinutes(), rawIndex)
   );
   resize.targetStartIndex = resize.originalStartIndex;
@@ -3437,6 +3454,31 @@ function selectCalendarSchedule(id, date) {
 
 function selectedCalendarScheduleMatches(id) {
   return Boolean(state.selectedCalendarSchedule && state.selectedCalendarSchedule.id === id);
+}
+
+function registerCalendarScheduleTap(id) {
+  const now = Date.now();
+  const lastTap = state.lastCalendarScheduleTap;
+  state.lastCalendarScheduleTap = { id, at: now };
+  return Boolean(lastTap && lastTap.id === id && now - lastTap.at <= 360);
+}
+
+async function deleteCalendarSchedule(id) {
+  const item = findItem(id);
+  if (!item || item.type !== "일정") return;
+  state.selectedCalendarSchedule = null;
+  state.calendarSelectedDate = null;
+  state.lastCalendarScheduleTap = null;
+  clearSelectedTimelineRange();
+
+  try {
+    await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    setStatus("Deleted.");
+    await loadItems();
+  } catch (error) {
+    setStatus(error.message || "Could not delete.");
+    render();
+  }
 }
 
 function startCalendarScheduleResize(event) {
@@ -4427,8 +4469,8 @@ function timelineOffsetUnits(minutes) {
   return Math.round((Number(minutes || 0) / TIMELINE_ROW_MINUTES) * 10000) / 10000;
 }
 
-function snapTimelineMinutes(minutes) {
-  return Math.round(Number(minutes || 0) / TIMELINE_TIME_STEP_MINUTES) * TIMELINE_TIME_STEP_MINUTES;
+function snapTimelineMinutes(minutes, step = TIMELINE_MANIPULATION_STEP_MINUTES) {
+  return Math.round(Number(minutes || 0) / step) * step;
 }
 
 function clampTimelineTime(time, allowEnd) {
