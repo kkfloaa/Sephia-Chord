@@ -11,6 +11,13 @@
   --danger: #ef978b;
   --ok: #b8d19f;
   --radius: 8px;
+  --fixed-content-top: 78px;
+  --fixed-content-bottom: 64px;
+  --auth-bg-start: #1a0d04;
+  --auth-bg-mid: #7b3f12;
+  --auth-bg-end: #2d1707;
+  --auth-bg-glow: #7b3f12;
+  --auth-bg-glow-rgb: 123, 63, 18;
 }
 
 * {
@@ -34,6 +41,13 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
+}
+
+html.fixed-tab,
+body.fixed-tab {
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body::before {
@@ -145,18 +159,114 @@ textarea {
   padding-top: 78px;
 }
 
+body.fixed-tab .shell,
+body.fixed-tab #appView {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+body.fixed-tab .shell {
+  padding-bottom: 0;
+}
+
+body.fixed-tab #statusMessage {
+  display: none;
+}
+
 .auth-view {
   position: fixed;
   inset: 0;
   z-index: 5;
+  isolation: isolate;
   display: grid;
   align-items: center;
   justify-items: center;
   min-height: 100vh;
   padding: 22px 18px calc(22px + env(safe-area-inset-bottom));
+  background: transparent;
+}
+
+.auth-bg-layer,
+.auth-paint-layer,
+.auth-unlock-logo {
+  position: fixed;
+  pointer-events: none;
+}
+
+.auth-bg-layer {
+  inset: 0;
+  z-index: 0;
   background:
-    linear-gradient(180deg, rgb(20 9 1 / 14%), rgb(18 8 1 / 8%) 45%, rgb(18 8 1 / 16%)),
-    url("/assets/sephia-chord-tone.png") right center / cover no-repeat;
+    radial-gradient(circle at 66% 56%, rgba(var(--auth-bg-glow-rgb), 0.38), transparent 46%),
+    linear-gradient(180deg, var(--auth-bg-start), var(--auth-bg-mid) 44%, var(--auth-bg-end));
+  will-change: opacity;
+}
+
+.auth-paint-layer {
+  inset: 0;
+  z-index: 1;
+  background: url("/assets/sephia-paint-layer.png?v=2") right center / cover no-repeat;
+  will-change: clip-path, opacity, transform;
+}
+
+.auth-view.is-unlocking {
+  pointer-events: none;
+}
+
+.auth-view.is-unlocking .auth-bg-layer {
+  animation: auth-background-exit 500ms ease-out forwards;
+}
+
+.auth-view.is-unlocking .auth-paint-layer {
+  animation: auth-paint-exit 500ms cubic-bezier(0.45, 0, 0.15, 1) forwards;
+}
+
+.auth-unlock-logo {
+  right: max(22px, env(safe-area-inset-right));
+  bottom: calc(48px + env(safe-area-inset-bottom));
+  z-index: 2;
+  width: min(56vw, 360px);
+  aspect-ratio: 1626 / 839;
+  background: url("/assets/sephia-logo-layer.png?v=2") center / contain no-repeat;
+  filter: drop-shadow(0 12px 28px rgb(0 0 0 / 34%));
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+.auth-unlock-logo::before,
+.auth-unlock-logo::after {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: inherit;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.auth-unlock-logo.is-glitching {
+  animation: auth-logo-glitch-base 180ms steps(2, end);
+}
+
+.auth-unlock-logo.is-glitching::before {
+  animation: auth-logo-glitch-red 180ms steps(2, end);
+  filter: drop-shadow(-3px 0 rgb(239 94 75 / 74%));
+}
+
+.auth-unlock-logo.is-glitching::after {
+  animation: auth-logo-glitch-blue 180ms steps(2, end);
+  filter: drop-shadow(3px 0 rgb(96 140 255 / 64%));
+}
+
+.auth-view.is-unlocking .auth-unlock-logo {
+  animation: auth-logo-exit 500ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.auth-view.is-unlocking .panel {
+  animation: auth-panel-exit 500ms linear forwards;
 }
 
 .panel {
@@ -181,6 +291,7 @@ textarea {
 
 .auth-view .panel {
   width: min(100%, 360px);
+  z-index: 3;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -190,6 +301,144 @@ textarea {
 .auth-view .auth-logo,
 .auth-view .auth-brand {
   display: none;
+}
+
+@keyframes auth-background-exit {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes auth-paint-exit {
+  0% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 88%, 0 75%, 0 61%, 0 48%, 0 34%, 0 20%);
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  28% {
+    clip-path: polygon(18% 0, 100% 0, 100% 100%, 8% 100%, 15% 88%, 6% 75%, 17% 61%, 9% 48%, 20% 34%, 11% 20%);
+    opacity: 0.94;
+    transform: scale(1.004);
+  }
+
+  54% {
+    clip-path: polygon(52% 0, 100% 0, 100% 100%, 43% 100%, 51% 88%, 39% 75%, 55% 61%, 44% 48%, 58% 34%, 47% 20%);
+    opacity: 0.76;
+    transform: scale(1.008);
+  }
+
+  80% {
+    clip-path: polygon(86% 0, 100% 0, 100% 100%, 79% 100%, 89% 88%, 76% 75%, 92% 61%, 82% 48%, 95% 34%, 84% 20%);
+    opacity: 0.44;
+    transform: scale(1.012);
+  }
+
+  100% {
+    clip-path: polygon(105% 0, 100% 0, 100% 100%, 105% 100%, 108% 88%, 104% 75%, 110% 61%, 106% 48%, 111% 34%, 107% 20%);
+    opacity: 0;
+    transform: scale(1.014);
+  }
+}
+
+@keyframes auth-logo-exit {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  52% {
+    opacity: 0.58;
+    transform: scale(1.12);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes auth-logo-glitch-base {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  28% {
+    transform: translate(1px, -1px) scale(1.006);
+  }
+
+  58% {
+    transform: translate(-1px, 1px) scale(0.998);
+  }
+}
+
+@keyframes auth-logo-glitch-red {
+  0%,
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 0;
+    transform: translate(0);
+  }
+
+  24% {
+    clip-path: inset(8% 0 65% 0);
+    opacity: 0.75;
+    transform: translate(-4px, 1px);
+  }
+
+  52% {
+    clip-path: inset(46% 0 30% 0);
+    opacity: 0.55;
+    transform: translate(3px, -1px);
+  }
+
+  76% {
+    clip-path: inset(72% 0 8% 0);
+    opacity: 0.65;
+    transform: translate(-2px, 0);
+  }
+}
+
+@keyframes auth-logo-glitch-blue {
+  0%,
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 0;
+    transform: translate(0);
+  }
+
+  18% {
+    clip-path: inset(64% 0 10% 0);
+    opacity: 0.56;
+    transform: translate(4px, -1px);
+  }
+
+  48% {
+    clip-path: inset(18% 0 58% 0);
+    opacity: 0.62;
+    transform: translate(-3px, 1px);
+  }
+
+  70% {
+    clip-path: inset(38% 0 40% 0);
+    opacity: 0.5;
+    transform: translate(2px, 0);
+  }
+}
+
+@keyframes auth-panel-exit {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 .pin-login {
@@ -378,6 +627,20 @@ h3 {
   gap: 14px;
 }
 
+body.fixed-tab #calendarTab:not([hidden]),
+body.fixed-tab #emotionTab:not([hidden]) {
+  position: fixed;
+  top: var(--fixed-content-top);
+  bottom: var(--fixed-content-bottom);
+  left: 50%;
+  z-index: 1;
+  overflow: hidden;
+  width: min(100%, 520px);
+  min-height: 0;
+  padding: 0 14px;
+  transform: translateX(-50%);
+}
+
 .section {
   display: grid;
   gap: 10px;
@@ -392,6 +655,23 @@ h3 {
 #calendarTab .section {
   gap: 6px;
   padding-top: 6px;
+}
+
+body.fixed-tab #calendarTab .section,
+body.fixed-tab #emotionTab .section {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 0;
+  padding-top: 0;
+}
+
+body.fixed-tab #calendarTab .section {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+body.fixed-tab #emotionTab .section {
+  gap: 0;
 }
 
 .section-header {
@@ -413,8 +693,10 @@ h3 {
 
 .timeline {
   --slot-height: 64px;
-  --timeline-time-width: 62px;
+  --timeline-time-width: 58px;
   position: relative;
+  z-index: 0;
+  isolation: isolate;
   display: grid;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -442,6 +724,15 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--accent-strong);
 }
 
+.slot.selecting,
+.slot.selected,
+.slot.selecting .slot-time,
+.slot.selecting .slot-body,
+.slot.selected .slot-time,
+.slot.selected .slot-body {
+  touch-action: none;
+}
+
 .slot.drag-target {
   box-shadow: inset 0 0 0 1px rgb(196 123 60 / 82%);
 }
@@ -454,18 +745,23 @@ h3 {
   display: grid;
   gap: 6px;
   min-height: 28px;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .slot-time {
   display: inline-flex;
   align-self: start;
-  justify-self: start;
-  width: max-content;
+  justify-content: flex-end;
+  justify-self: stretch;
+  width: 100%;
   line-height: 1.2;
   color: var(--muted);
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
   touch-action: pan-y;
+  transform: translateX(-6px);
+  white-space: nowrap;
 }
 
 .timeline-layer {
@@ -479,7 +775,7 @@ h3 {
 
 .timeline-layer .timeline-item {
   position: absolute;
-  grid-template-columns: 28px minmax(0, 1fr) 30px;
+  grid-template-columns: 42px minmax(0, 1fr) 30px;
   top: calc(var(--slot-start) * var(--slot-height) + 6px);
   left: calc(var(--slot-column, 0) * 100% / var(--slot-columns, 1));
   z-index: 1;
@@ -494,19 +790,50 @@ h3 {
   user-select: none;
 }
 
+.timeline-layer .timeline-item.event-item {
+  border-color: rgb(244 151 143 / 62%);
+  background: linear-gradient(180deg, rgb(97 48 43 / 92%), rgb(58 31 28 / 94%));
+  color: #ffe2dd;
+}
+
+.timeline-layer .timeline-item.task-item {
+  border-color: rgb(147 216 166 / 62%);
+  background: linear-gradient(180deg, rgb(39 75 53 / 92%), rgb(25 48 35 / 94%));
+  color: #def6e6;
+}
+
 .timeline-layer .timeline-item.routine-item {
-  border-color: #b98352;
-  background: linear-gradient(180deg, #4a2f1e, #332115);
-  color: #ffe3c4;
+  border-color: rgb(143 180 232 / 64%);
+  background: linear-gradient(180deg, rgb(43 61 89 / 92%), rgb(27 39 59 / 94%));
+  color: #deebff;
+}
+
+.timeline-layer .timeline-item.event-item .item-meta {
+  color: #f4bdb6;
+}
+
+.timeline-layer .timeline-item.task-item .item-meta {
+  color: #b5e4c3;
 }
 
 .timeline-layer .timeline-item.routine-item .item-meta {
-  color: #f0c89f;
+  color: #b8cdf0;
+}
+
+.timeline-layer .timeline-item.event-item .tag {
+  border-color: rgb(244 151 143 / 52%);
+  background: rgb(58 28 25 / 72%);
+  color: #ffd7d1;
+}
+
+.timeline-layer .timeline-item.task-item .checkbox {
+  border-color: rgb(147 216 166 / 62%);
+  background: rgb(20 40 29 / 72%);
 }
 
 .timeline-layer .timeline-item.routine-item .checkbox {
-  border-color: #d69a64;
-  background: #2d1d13;
+  border-color: rgb(143 180 232 / 64%);
+  background: rgb(22 34 52 / 72%);
 }
 
 .timeline-layer .timeline-item.dragging {
@@ -540,6 +867,18 @@ h3 {
   justify-self: center;
 }
 
+.timeline-layer .timeline-item .tag {
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 4px;
+  padding-left: 4px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .timeline-layer .timeline-item .checkbox {
   width: 26px;
   height: 26px;
@@ -569,11 +908,12 @@ h3 {
 
 .timeline-resize-handle {
   position: absolute;
-  right: 12px;
-  left: 12px;
+  right: 4px;
+  left: 4px;
   z-index: 5;
   display: none;
-  height: 16px;
+  height: 24px;
+  cursor: ns-resize;
   pointer-events: none;
   touch-action: none;
 }
@@ -582,6 +922,7 @@ h3 {
   position: absolute;
   right: 34%;
   left: 34%;
+  display: none;
   height: 2px;
   border-radius: 999px;
   background: var(--accent-strong);
@@ -594,7 +935,7 @@ h3 {
 }
 
 .timeline-resize-handle.resize-start {
-  top: -1px;
+  top: -5px;
 }
 
 .timeline-resize-handle.resize-start::before {
@@ -602,7 +943,7 @@ h3 {
 }
 
 .timeline-resize-handle.resize-end {
-  bottom: -1px;
+  bottom: -5px;
 }
 
 .timeline-resize-handle.resize-end::before {
@@ -762,6 +1103,15 @@ h3 {
   overflow: hidden;
 }
 
+body.fixed-tab #emotionTab .challenge-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+body.fixed-tab #emotionTab .challenge-panel.challenge-cleared {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .challenge-summary {
   display: flex;
   align-items: baseline;
@@ -843,6 +1193,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  min-height: 0;
 }
 
 .challenge-gallery-card {
@@ -983,6 +1334,11 @@ h3 {
   will-change: transform;
 }
 
+body.fixed-tab #calendarTab .schedule-calendar {
+  height: 100%;
+  min-height: 0;
+}
+
 .schedule-calendar.month-swiping {
   transition: none;
 }
@@ -1045,6 +1401,7 @@ h3 {
 
 .schedule-calendar .day-cell,
 .emotion-calendar .day-cell {
+  position: relative;
   align-content: start;
   grid-template-rows: auto 1fr;
   height: var(--calendar-day-height);
@@ -1071,13 +1428,12 @@ h3 {
   color: var(--accent-strong);
 }
 
-.day-cell.calendar-selecting {
-  box-shadow: inset 0 0 0 1px var(--accent-strong);
+.schedule-calendar .day-cell:has(.schedule-chip:active) {
+  transform: none;
 }
 
-.day-cell.calendar-resize-target,
-.day-cell.calendar-drag-target {
-  box-shadow: inset 0 0 0 1px rgb(241 216 189 / 82%);
+.day-cell.calendar-selecting {
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
 }
 
 .day-cell .dot {
@@ -1105,25 +1461,25 @@ h3 {
   min-height: 12px;
 }
 
-.day-cell.has-calendar-mark .day-head {
-  min-height: 29px;
-}
-
 .holiday-label {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
   display: block;
-  justify-self: start;
   overflow: hidden;
-  height: var(--schedule-chip-height, 15px);
-  max-width: 100%;
+  height: 12px;
+  max-width: calc(100% - 22px);
   border: 1px solid rgb(239 151 139 / 38%);
   border-radius: 999px;
   background: rgb(75 32 24 / 62%);
   color: #ffc8bd;
-  font-size: var(--schedule-chip-font-size, 9px);
-  line-height: 1.05;
-  padding: 2px 4px;
+  font-size: 7.5px;
+  line-height: 1;
+  padding: 1px 3px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 .calendar-mark-festival .holiday-label {
@@ -1180,19 +1536,38 @@ h3 {
 .schedule-chip.selected {
   z-index: 4;
   border-color: var(--accent-strong);
-  padding-right: 12px;
-  padding-left: 12px;
   box-shadow: 0 0 0 1px rgb(241 216 189 / 58%);
+}
+
+.schedule-chip.selected.connect-left,
+.schedule-chip.selected.connect-right {
+  box-shadow: none;
 }
 
 .schedule-chip.resizing {
   box-shadow: 0 0 0 1px var(--accent-strong), 0 6px 16px rgb(0 0 0 / 24%);
 }
 
+.schedule-chip.resize-source-hidden,
+.schedule-chip.drag-source-hidden {
+  visibility: hidden;
+}
+
+.schedule-chip.schedule-resize-preview,
+.schedule-chip.schedule-drag-preview {
+  z-index: 6;
+  pointer-events: none;
+}
+
 .schedule-chip.dragging {
   cursor: grabbing;
   opacity: 0.9;
   box-shadow: 0 0 0 1px var(--accent-strong), 0 8px 18px rgb(0 0 0 / 30%);
+}
+
+.schedule-chip.schedule-drag-preview.connect-left,
+.schedule-chip.schedule-drag-preview.connect-right {
+  box-shadow: none;
 }
 
 .calendar-resize-handle {
@@ -1211,6 +1586,7 @@ h3 {
   position: absolute;
   top: 4px;
   bottom: 4px;
+  display: none;
   width: 2px;
   border-radius: 999px;
   background: var(--accent-strong);
@@ -1396,6 +1772,43 @@ dialog {
   overflow: hidden;
 }
 
+#itemDialog {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+
+#itemDialog[open] {
+  display: grid;
+  place-items: center;
+}
+
+.item-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  border: 0;
+  background: rgb(0 0 0 / 0.001);
+  color: transparent;
+  padding: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 dialog::backdrop {
   background: rgb(5 3 2 / 72%);
 }
@@ -1406,10 +1819,84 @@ dialog::backdrop {
   padding: 16px;
 }
 
-.item-dialog-body {
+#emotionDialog .dialog-body {
   max-height: calc(100dvh - 24px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#emotionDialog .emotion-dialog-content {
+  min-height: 0;
+}
+
+.logout-mood-dialog .dialog-body {
+  gap: 12px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.logout-mood-dialog h2 {
+  font-size: 18px;
+}
+
+.logout-mood-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.logout-mood-content {
+  display: grid;
+  gap: 8px;
+}
+
+.logout-mood-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.logout-mood-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.logout-mood-button {
+  display: block;
+  aspect-ratio: 1;
+  min-height: 52px;
+  border: 1px solid var(--emotion-swatch-border);
+  border-radius: var(--radius);
+  background: var(--emotion-swatch);
+  padding: 0;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.logout-mood-button:active,
+.logout-mood-button.selected {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px #0f0c09, 0 0 0 4px var(--accent-strong);
+  transform: scale(.96);
+}
+
+.item-dialog-body {
+  --dialog-inline-padding: 16px;
+  position: relative;
+  z-index: 2;
+  width: min(100%, 520px);
+  max-width: 100%;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(31 23 17 / 98%), rgb(17 13 10 / 99%)),
+    url("/assets/sephia-chord-tone.png");
+  background-position: center, bottom -260px right -270px;
+  background-repeat: no-repeat;
+  background-size: auto, 620px 620px;
   gap: 16px;
   padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
   -webkit-overflow-scrolling: touch;
@@ -1432,7 +1919,7 @@ dialog::backdrop {
 
 .item-dialog-header {
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: 72px minmax(0, 1fr) 72px;
   align-items: center;
 }
 
@@ -1450,13 +1937,24 @@ dialog::backdrop {
   color: var(--muted);
   padding: 0 8px;
   text-align: left;
+  white-space: nowrap;
   transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
   -webkit-tap-highlight-color: transparent;
+}
+
+.item-dialog-header .dialog-text-button {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
 }
 
 .dialog-text-button.primary-text {
   color: var(--accent-strong);
   text-align: right;
+}
+
+.item-dialog-header .dialog-text-button.primary-text {
+  text-align: center;
 }
 
 .dialog-close-button {
@@ -1803,7 +2301,7 @@ dialog::backdrop {
 }
 
 .calendar-timeline-content .slot-body {
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .emotion-dialog-date {
@@ -1857,9 +2355,16 @@ dialog::backdrop {
 }
 
 .picker-panel {
+  position: absolute;
+  top: var(--picker-top, 0);
+  right: var(--dialog-inline-padding);
+  left: var(--dialog-inline-padding);
+  z-index: 20;
   display: grid;
-  grid-column: 1 / -1;
   gap: 12px;
+  max-height: min(380px, var(--picker-max-height, 360px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid #4a382b;
   border-radius: var(--radius);
   background:
@@ -1870,13 +2375,14 @@ dialog::backdrop {
   background-size: auto, 480px 480px;
   box-shadow: 0 16px 38px rgb(0 0 0 / 34%);
   padding: 12px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .picker-header {
   display: grid;
-  grid-template-columns: 42px 1fr 42px;
+  grid-template-columns: 36px 1fr 36px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .picker-header strong {
@@ -1895,7 +2401,7 @@ dialog::backdrop {
 
 .picker-icon-button {
   display: grid;
-  min-height: 38px;
+  min-height: 34px;
   place-items: center;
   border-color: #4b392d;
   background: #20160f;
@@ -1907,26 +2413,25 @@ dialog::backdrop {
 .picker-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 5px;
+  gap: 4px;
 }
 
 .picker-weekday {
   display: grid;
-  min-height: 24px;
+  min-height: 20px;
   place-items: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .picker-day {
   display: grid;
-  aspect-ratio: 1;
-  min-height: 35px;
+  min-height: 30px;
   place-items: center;
   border-color: #2f241b;
   background: rgb(16 13 10 / 78%);
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   padding: 0;
 }
 
@@ -1971,12 +2476,6 @@ dialog::backdrop {
   background: rgb(139 77 32 / 76%);
   color: #fff7ed;
   transform: scale(.96);
-}
-
-.time-picker-current {
-  color: var(--text);
-  font-size: 24px;
-  text-align: center;
 }
 
 .time-wheel {
@@ -2083,6 +2582,12 @@ dialog::backdrop {
     padding-left: 10px;
   }
 
+  body.fixed-tab #calendarTab:not([hidden]),
+  body.fixed-tab #emotionTab:not([hidden]) {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
   .topbar {
     padding-right: 10px;
     padding-left: 10px;
@@ -2100,9 +2605,23 @@ dialog::backdrop {
   }
 
   .timeline-layer .timeline-item {
-    grid-template-columns: 24px minmax(0, 1fr) 26px;
+    grid-template-columns: 36px minmax(0, 1fr) 26px;
     gap: 6px;
     padding: 5px;
+  }
+
+  .timeline-resize-handle {
+    right: 2px;
+    left: 2px;
+    height: 28px;
+  }
+
+  .timeline-resize-handle.resize-start {
+    top: -7px;
+  }
+
+  .timeline-resize-handle.resize-end {
+    bottom: -7px;
   }
 
   .timeline-layer .timeline-item .checkbox {
@@ -2177,17 +2696,17 @@ dialog::backdrop {
     min-height: 12px;
   }
 
-  .day-cell.has-calendar-mark .day-head {
-    min-height: 29px;
-  }
-
   .day-number {
     font-size: 12px;
   }
 
   .holiday-label {
-    font-size: 8.5px;
-    padding: 2px 4px;
+    top: 4px;
+    right: 4px;
+    height: 11px;
+    max-width: calc(100% - 20px);
+    font-size: 7px;
+    padding: 1px 3px;
   }
 
   .day-schedules {
@@ -2208,6 +2727,7 @@ dialog::backdrop {
   }
 
   .item-dialog-body {
+    --dialog-inline-padding: 14px;
     gap: 13px;
     padding-right: 14px;
     padding-left: 14px;

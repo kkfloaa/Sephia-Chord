@@ -7,11 +7,15 @@ const state = {
   items: [],
   itemTimeMemory: {},
   editingItem: null,
+  itemDialogReturnTarget: null,
+  itemDialogSaveInProgress: false,
   timeSelection: null,
   selectedTimeRange: null,
   selectedTimelineItem: null,
   timeClickTimer: null,
   timeSelectionHoldTimer: null,
+  suppressTimeSelectionPointerId: null,
+  suppressTimeSelectionTimer: null,
   timelineDrag: null,
   timelineResize: null,
   suppressTimelineItemClick: false,
@@ -27,6 +31,7 @@ const state = {
   suppressCalendarScheduleClick: false,
   suppressCalendarClick: false,
   lastCalendarClick: null,
+  calendarSelectedDate: null,
   selectedEmotionDate: null,
   selectedChallengeLayer: null,
   challengeAnalysis: null,
@@ -68,11 +73,54 @@ const TIME_WHEEL_SETTLE_DELAY_MS = 140;
 const TIME_WHEEL_LOOP_COPIES = 7;
 const TIMELINE_TOUCH_HOLD_DELAY = 260;
 const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
+const AUTH_UNLOCK_ANIMATION_MS = 500;
+const AUTH_MOOD_STORAGE_KEY = "sephia-chord.authMood";
 const CHALLENGE_CANVAS_WIDTH = 720;
 const CHALLENGE_WHITE_THRESHOLD = 250;
 const CHALLENGE_MIN_LAYER_AREA = 400;
-const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ROUTINE_DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const ROUTINE_DAY_LABELS = {
+  "일": "Sun",
+  "월": "Mon",
+  "화": "Tue",
+  "수": "Wed",
+  "목": "Thu",
+  "금": "Fri",
+  "토": "Sat"
+};
+const TYPE_LABELS = {
+  "일정": "Event",
+  "할일": "Task",
+  "루틴": "Routine",
+  "루틴기록": "Routine Log",
+  "감정": "Emotion",
+  "기분": "Mood",
+  "챌린지": "Challenge"
+};
+const EMOTION_LABELS = {
+  "나쁨": "Bad",
+  "애매함": "Mixed",
+  "좋음": "Good",
+  "빨강": "Red",
+  "빨강 1": "Red 1",
+  "빨강 2": "Red 2",
+  "빨강 3": "Red 3",
+  "빨강 4": "Red 4",
+  "빨강 5": "Red 5",
+  "파랑": "Blue",
+  "파랑 1": "Blue 1",
+  "파랑 2": "Blue 2",
+  "파랑 3": "Blue 3",
+  "파랑 4": "Blue 4",
+  "파랑 5": "Blue 5",
+  "초록": "Green",
+  "초록 1": "Green 1",
+  "초록 2": "Green 2",
+  "초록 3": "Green 3",
+  "초록 4": "Green 4",
+  "초록 5": "Green 5"
+};
 const EMOTION_GROUPS = [
   {
     name: "빨강",
@@ -179,6 +227,7 @@ const els = {
   allDayInput: document.querySelector("#allDayInput"),
   appView: document.querySelector("#appView"),
   authMessage: document.querySelector("#authMessage"),
+  authUnlockLogo: document.querySelector(".auth-unlock-logo"),
   authView: document.querySelector("#authView"),
   calendarTimelineContent: document.querySelector("#calendarTimelineContent"),
   calendarTimelineDialog: document.querySelector("#calendarTimelineDialog"),
@@ -187,6 +236,7 @@ const els = {
   closeCalendarTimelineDialogButton: document.querySelector("#closeCalendarTimelineDialogButton"),
   closeDialogButton: document.querySelector("#closeDialogButton"),
   closeEmotionDialogButton: document.querySelector("#closeEmotionDialogButton"),
+  closeLogoutMoodDialogButton: document.querySelector("#closeLogoutMoodDialogButton"),
   dateFields: document.querySelector("#dateFields"),
   dateInput: document.querySelector("#dateInput"),
   deleteButton: document.querySelector("#deleteButton"),
@@ -201,7 +251,10 @@ const els = {
   emotionDialogTitle: document.querySelector("#emotionDialogTitle"),
   emotionTab: document.querySelector("#emotionTab"),
   itemForm: document.querySelector("#itemForm"),
+  itemDialogBackdrop: document.querySelector("#itemDialogBackdrop"),
   loginForm: document.querySelector("#loginForm"),
+  logoutMoodContent: document.querySelector("#logoutMoodContent"),
+  logoutMoodDialog: document.querySelector("#logoutMoodDialog"),
   noteInput: document.querySelector("#noteInput"),
   passwordInput: document.querySelector("#passwordInput"),
   pickerPanel: document.querySelector("#pickerPanel"),
@@ -223,22 +276,30 @@ const els = {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  applyStoredAuthMood();
   bindEvents();
-  await checkAuth();
+  await requireLoginOnEntry();
 }
 
 function bindEvents() {
   els.loginForm.addEventListener("submit", login);
   document.addEventListener("keydown", handlePinKeydown);
   document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
+  document.addEventListener("pointerdown", closeItemDialogOnOutsidePointer, true);
+  document.addEventListener("click", closeItemDialogOnOutsidePointer, true);
   document.addEventListener("click", suppressPickerOutsideClick, true);
   bindDialogButtonFeedback();
   document.querySelector("#logoutButton").addEventListener("click", logout);
   document.querySelector("#refreshButton").addEventListener("click", loadItems);
   els.closeCalendarTimelineDialogButton.addEventListener("click", () => els.calendarTimelineDialog.close());
-  els.closeDialogButton.addEventListener("click", () => els.dialog.close());
+  els.closeDialogButton.addEventListener("click", cancelItemDialog);
+  els.itemDialogBackdrop.addEventListener("pointerdown", handleItemDialogBackdropPress);
+  els.itemDialogBackdrop.addEventListener("click", cancelItemDialog);
   els.closeEmotionDialogButton.addEventListener("click", () => els.emotionDialog.close());
-  els.dialog.addEventListener("close", closePicker);
+  els.closeLogoutMoodDialogButton.addEventListener("click", () => els.logoutMoodDialog.close());
+  els.dialog.addEventListener("pointerdown", closeItemDialogOnOutsidePointer);
+  els.dialog.addEventListener("click", closeItemDialogOnOutsidePointer);
+  els.dialog.addEventListener("close", handleItemDialogClose);
   els.dialog.addEventListener("cancel", closePicker);
   els.allDayInput.addEventListener("change", applyAllDayTime);
   els.typeInput.addEventListener("change", updateFormVisibility);
@@ -251,7 +312,8 @@ function bindEvents() {
   els.itemForm.addEventListener("submit", saveItem);
   els.deleteButton.addEventListener("click", deleteCurrentItem);
   document.querySelectorAll("[data-picker]").forEach((input) => {
-    input.addEventListener("click", () => openPicker(input));
+    input.addEventListener("pointerdown", (event) => openPickerFromPointer(event, input));
+    input.addEventListener("click", (event) => openPickerFromClick(event, input));
     input.addEventListener("focus", () => openPicker(input));
     input.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -265,10 +327,12 @@ function bindEvents() {
     });
   });
   document.querySelectorAll(".time-editor-field").forEach((field) => {
-    field.addEventListener("click", () => openPicker(field.querySelector("[data-picker='time']")));
+    field.addEventListener("pointerdown", (event) => openPickerFromPointer(event, field.querySelector("[data-picker='time']")));
+    field.addEventListener("click", (event) => openPickerFromClick(event, field.querySelector("[data-picker='time']")));
   });
   document.querySelectorAll(".date-editor-field").forEach((field) => {
-    field.addEventListener("click", () => openPicker(field.querySelector("[data-picker='date']")));
+    field.addEventListener("pointerdown", (event) => openPickerFromPointer(event, field.querySelector("[data-picker='date']")));
+    field.addEventListener("click", (event) => openPickerFromClick(event, field.querySelector("[data-picker='date']")));
   });
   document.querySelectorAll(".editor-date-time-row").forEach((row) => {
     row.addEventListener("click", (event) => {
@@ -358,6 +422,10 @@ function bindEvents() {
       markEmotionSelection(action.dataset.emotion);
       await saveEmotion(action.dataset.emotion);
     }
+    if (action.dataset.action === "choose-logout-mood") {
+      event.stopPropagation();
+      await chooseLogoutMood(action.dataset.emotion);
+    }
     if (action.dataset.action === "open-challenge-gallery") {
       event.stopPropagation();
       openChallengeGallery();
@@ -398,14 +466,22 @@ function bindEvents() {
         return;
       }
 
+      if (state.tab === "calendar") {
+        const wasSelected = state.calendarSelectedDate === selectedDate;
+        state.selectedDate = selectedDate;
+        state.calendarSelectedDate = selectedDate;
+        state.lastCalendarClick = null;
+        state.selectedCalendarSchedule = null;
+        clearSelectedTimelineRange();
+        render();
+        if (wasSelected) openCalendarTimelineDialog();
+        return;
+      }
       state.selectedDate = selectedDate;
       state.lastCalendarClick = null;
       state.selectedCalendarSchedule = null;
       clearSelectedTimelineRange();
       render();
-      if (state.tab === "calendar") {
-        openCalendarTimelineDialog();
-      }
       return;
     }
     if (action.dataset.action === "month-prev") {
@@ -430,10 +506,6 @@ function bindEvents() {
       event.preventDefault();
       window.clearTimeout(state.timeClickTimer);
       state.timeClickTimer = null;
-      if (timeSlotMatchesSelectedRange(slot)) {
-        clearSelectedTimelineRange();
-        render();
-      }
       return;
     }
 
@@ -476,10 +548,18 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarMonthSwipe);
   document.body.addEventListener("pointerup", finishCalendarMonthSwipe);
   document.body.addEventListener("pointercancel", cancelCalendarMonthSwipe);
+  document.body.addEventListener("pointerdown", clearTimelineItemOnOutsidePointer);
+  document.body.addEventListener("pointerdown", clearCalendarDateOnOutsidePointer);
+  document.addEventListener("scroll", clearTimelineItemOnScroll, true);
   document.body.addEventListener("pointerdown", startCalendarSelection);
   document.body.addEventListener("pointermove", moveCalendarSelection);
   document.body.addEventListener("pointerup", finishCalendarSelection);
   document.body.addEventListener("pointercancel", cancelCalendarSelection);
+  window.addEventListener("pagehide", lockAppForNextEntry);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") lockAppForNextEntry();
+  });
+  window.addEventListener("resize", handleViewportResize);
 }
 
 function bindDialogButtonFeedback() {
@@ -524,6 +604,11 @@ async function checkAuth() {
   if (state.authenticated) await loadItems();
 }
 
+async function requireLoginOnEntry() {
+  lockAppView();
+  await clearAuthSession();
+}
+
 async function login(event) {
   event.preventDefault();
   if (state.pinSubmitting) return;
@@ -531,7 +616,7 @@ async function login(event) {
   const password = els.passwordInput.value;
 
   if (!new RegExp(`^\\d{${PIN_LENGTH}}$`).test(password)) {
-    els.authMessage.textContent = "4자리 숫자를 입력하세요.";
+    els.authMessage.textContent = "Enter a 4-digit PIN.";
     return;
   }
 
@@ -542,7 +627,7 @@ async function login(event) {
       body: { password }
     });
     setPinValue("");
-    await checkAuth();
+    await unlockAppAfterLogin();
   } catch (error) {
     els.authMessage.textContent = authErrorMessage(error);
     setPinValue("");
@@ -552,40 +637,137 @@ async function login(event) {
 }
 
 async function logout() {
-  await api("/api/auth", { method: "DELETE" });
+  openLogoutMoodDialog();
+}
+
+async function completeLogout() {
+  await clearAuthSession();
+  lockAppView();
+}
+
+function openLogoutMoodDialog() {
+  if (!els.logoutMoodDialog || !els.logoutMoodContent) {
+    completeLogout();
+    return;
+  }
+
+  els.logoutMoodContent.innerHTML = renderLogoutMoodChoices(storedAuthMood());
+  if (!els.logoutMoodDialog.open) {
+    els.logoutMoodDialog.showModal();
+  }
+}
+
+function renderLogoutMoodChoices(selectedEmotion = "") {
+  const normalized = normalizeEmotionValue(selectedEmotion);
+  return `
+    <div class="logout-mood-grid" aria-label="Mood color selection">
+      ${EMOTION_GROUPS.map((group) => `
+        <div class="logout-mood-row" aria-label="${displayEmotion(group.name)}">
+          ${group.options.map((option) => `
+            <button
+              type="button"
+              class="logout-mood-button ${normalized === option.value ? "selected" : ""}"
+              data-action="choose-logout-mood"
+              data-emotion="${option.value}"
+              aria-label="${displayEmotion(option.value)}"
+              style="--emotion-swatch:${option.color}; --emotion-swatch-border:${option.border};"
+            ></button>
+          `).join("")}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function chooseLogoutMood(emotion) {
+  const normalized = normalizeEmotionValue(emotion);
+  if (!emotionPalette(normalized)) return;
+  storeAuthMood(normalized);
+  applyAuthMood(normalized);
+  if (els.logoutMoodDialog.open) els.logoutMoodDialog.close();
+  await completeLogout();
+}
+
+async function unlockAppAfterLogin() {
+  state.authenticated = true;
+  els.appView.hidden = false;
+  const loadPromise = loadItems();
+  await playAuthUnlockAnimation();
+  els.authView.hidden = true;
+  els.authView.classList.remove("is-unlocking");
+  await loadPromise;
+}
+
+function playAuthUnlockAnimation() {
+  els.authView.classList.add("is-unlocking");
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      resolve();
+    }, AUTH_UNLOCK_ANIMATION_MS);
+  });
+}
+
+function lockAppForNextEntry() {
+  if (!state.authenticated) return;
+  lockAppView();
+  clearAuthSession({ keepalive: true });
+}
+
+function lockAppView() {
   state.authenticated = false;
+  applyStoredAuthMood();
+  document.documentElement.classList.remove("fixed-tab");
+  document.body.classList.remove("fixed-tab");
+  document.body.removeAttribute("data-active-tab");
+  els.appView.removeAttribute("data-tab");
+  els.authView.classList.remove("is-unlocking");
   setPinValue("");
   if (els.calendarTimelineDialog.open) els.calendarTimelineDialog.close();
   if (els.dialog.open) els.dialog.close();
+  state.itemDialogReturnTarget = null;
+  state.itemDialogSaveInProgress = false;
   if (els.emotionDialog.open) els.emotionDialog.close();
+  if (els.logoutMoodDialog.open) els.logoutMoodDialog.close();
   els.authView.hidden = false;
   els.appView.hidden = true;
+}
+
+async function clearAuthSession(options = {}) {
+  try {
+    await api("/api/auth", {
+      method: "DELETE",
+      keepalive: Boolean(options.keepalive)
+    });
+  } catch {
+    // The local lock screen is still enforced even if the network drops while closing.
+  }
 }
 
 function authErrorMessage(error) {
   const payload = error.payload || {};
   if (payload.error === "login_locked") {
-    return `${formatRetryAfter(payload.retryAfterSeconds)} 후 다시 시도하세요.`;
+    return `Try again in ${formatRetryAfter(payload.retryAfterSeconds)}.`;
   }
   if (payload.remainingAttempts !== undefined) {
-    return `비밀번호가 맞지 않습니다. ${payload.remainingAttempts}회 남았습니다.`;
+    return `Incorrect PIN. ${payload.remainingAttempts} attempts left.`;
   }
-  return "비밀번호가 맞지 않습니다.";
+  return "Incorrect PIN.";
 }
 
 function formatRetryAfter(seconds) {
   const value = Math.max(1, Number(seconds) || 1);
   const minutes = Math.floor(value / 60);
   const rest = value % 60;
-  if (minutes && rest) return `${minutes}분 ${rest}초`;
-  if (minutes) return `${minutes}분`;
-  return `${rest}초`;
+  if (minutes && rest) return `${minutes}m ${rest}s`;
+  if (minutes) return `${minutes}m`;
+  return `${rest}s`;
 }
 
 function appendPinDigit(digit) {
   if (els.authView.hidden || state.pinSubmitting || !/^\d$/.test(String(digit))) return;
   if (els.passwordInput.value.length >= PIN_LENGTH) return;
   setPinValue(`${els.passwordInput.value}${digit}`);
+  pulseAuthLogoGlitch();
   if (els.passwordInput.value.length === PIN_LENGTH) {
     window.setTimeout(() => els.loginForm.requestSubmit(), 120);
   }
@@ -594,6 +776,7 @@ function appendPinDigit(digit) {
 function deletePinDigit() {
   if (els.authView.hidden || state.pinSubmitting) return;
   setPinValue(els.passwordInput.value.slice(0, -1));
+  pulseAuthLogoGlitch();
 }
 
 function setPinValue(value) {
@@ -608,6 +791,13 @@ function updatePinDots() {
   document.querySelectorAll(".pin-dots span").forEach((dot, index) => {
     dot.classList.toggle("filled", index < els.passwordInput.value.length);
   });
+}
+
+function pulseAuthLogoGlitch() {
+  if (!els.authUnlockLogo || els.authView.hidden) return;
+  els.authUnlockLogo.classList.remove("is-glitching");
+  void els.authUnlockLogo.offsetWidth;
+  els.authUnlockLogo.classList.add("is-glitching");
 }
 
 function handlePinKeydown(event) {
@@ -627,7 +817,7 @@ function handlePinKeydown(event) {
 }
 
 async function loadItems() {
-  setStatus("불러오는 중...");
+  setStatus("Loading...");
   state.loading = true;
   const { start, end } = queryRange();
 
@@ -640,7 +830,7 @@ async function loadItems() {
   } catch (error) {
     state.items = [];
     render();
-    setStatus(error.message || "Notion 데이터를 불러오지 못했습니다.");
+    setStatus(error.message || "Could not load Notion data.");
   } finally {
     state.loading = false;
   }
@@ -657,6 +847,12 @@ function render() {
 }
 
 function renderTabs() {
+  const fixedTab = state.tab === "calendar" || state.tab === "emotion";
+  document.documentElement.classList.toggle("fixed-tab", fixedTab);
+  document.body.classList.toggle("fixed-tab", fixedTab);
+  document.body.dataset.activeTab = state.tab;
+  els.appView.dataset.tab = state.tab;
+
   for (const view of [els.todayTab, els.calendarTab, els.emotionTab, els.routinesTab]) {
     view.hidden = true;
   }
@@ -671,6 +867,27 @@ function renderTabs() {
     routines: els.routinesTab
   }[state.tab];
   activeView.hidden = false;
+  updateFixedTabMetrics();
+}
+
+function updateFixedTabMetrics() {
+  window.requestAnimationFrame(() => {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
+    const topbarBottom = document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 78;
+    const bottomNavTop = document.querySelector(".bottom-nav")?.getBoundingClientRect().top ?? (viewportHeight - 64);
+    const contentTop = Math.max(0, Math.round(topbarBottom));
+    const contentBottom = Math.max(0, Math.round(viewportHeight - bottomNavTop));
+
+    document.documentElement.style.setProperty("--fixed-content-top", `${contentTop}px`);
+    document.documentElement.style.setProperty("--fixed-content-bottom", `${contentBottom}px`);
+  });
+}
+
+function handleViewportResize() {
+  updateFixedTabMetrics();
+  if (!state.authenticated) return;
+  if (state.tab === "calendar") renderCalendar();
+  if (state.tab === "emotion") renderEmotionTab();
 }
 
 function renderToday() {
@@ -679,7 +896,7 @@ function renderToday() {
   els.todayTab.innerHTML = `
     <section class="section">
       <div class="section-header">
-        <h2>시간표</h2>
+        <h2>Timeline</h2>
       </div>
       <div class="timeline" data-timeline-context="today">${renderTimeline(timelineItems, "today")}</div>
     </section>
@@ -724,7 +941,7 @@ function renderTimeline(schedules, context = "today") {
 
   return `
     ${rows}
-    <div class="timeline-layer" aria-label="시간표 항목">
+    <div class="timeline-layer" aria-label="Timeline items">
       ${blocks.map((block) => renderSchedulePill(block, context)).join("")}
     </div>
   `;
@@ -737,12 +954,13 @@ function renderSchedulePill(block, context) {
   const selected = selectable && selectedTimelineItemMatches(item.id, context);
   const check = item.type === "할일" || item.type === "루틴"
     ? `<button type="button" class="checkbox" data-action="${item.type === "루틴" ? "toggle-routine" : "toggle-task"}" data-id="${item.id}">${done ? '<span class="checkmark">✓</span>' : ""}</button>`
-    : `<span class="tag">${escapeHtml(item.type || "")}</span>`;
+    : `<span class="tag">${escapeHtml(displayType(item.type))}</span>`;
   const cardAction = selectable ? "select-timeline-item" : "edit";
+  const typeClass = timelineTypeClass(item.type);
 
   return `
     <div
-      class="item timeline-item ${item.type === "루틴" ? "routine-item" : ""} ${done ? "done" : ""} ${selected ? "selected" : ""}"
+      class="item timeline-item ${typeClass} ${done ? "done" : ""} ${selected ? "selected" : ""}"
       data-timeline-id="${item.id}"
       data-action="${cardAction}"
       data-id="${item.id}"
@@ -762,6 +980,13 @@ function renderSchedulePill(block, context) {
       ` : ""}
     </div>
   `;
+}
+
+function timelineTypeClass(type) {
+  if (type === "일정") return "event-item";
+  if (type === "할일") return "task-item";
+  if (type === "루틴") return "routine-item";
+  return "";
 }
 
 function routineTimelineItem(routine) {
@@ -786,7 +1011,7 @@ function todoTimelineItem(todo) {
 
 function timelineItemTimeMeta(item) {
   const time = `${item.startTime || ""} - ${item.endTime || ""}`;
-  return escapeHtml(item.timeUnset ? `${time} · 시간 미설정` : time);
+  return escapeHtml(item.timeUnset ? `${time} · Time unset` : time);
 }
 
 function timelineItemDone(item) {
@@ -873,7 +1098,7 @@ function calendarZoomStyle(scheduleRowCount, weekCount = 6) {
   const chipHeight = compact ? 15 : 15;
   const chipFontSize = compact ? 8.5 : 9;
   const rowHeight = chipHeight + 2;
-  const topHeight = compact ? 29 : 29;
+  const topHeight = compact ? 14 : 14;
   const gap = roundCalendarZoomValue(Math.max(3, baseGap * zoom));
   const minimumDayHeight = topHeight + scheduleRowCount * rowHeight;
   const availableDayHeight = calendarAvailableDayHeight(weekCount, gap);
@@ -929,9 +1154,9 @@ function renderCalendarTimelineDialog() {
 }
 
 function renderCalendarDay(day, scheduleRows = {}) {
-  const schedules = itemsFor("일정", day.date).sort(byStartTime);
+  const schedules = calendarSchedulesForDate(day.date).sort(byStartTime);
   const mark = koreanCalendarMark(day.date);
-  const isSelected = day.date === state.selectedDate;
+  const isSelected = day.date === state.calendarSelectedDate;
   const classes = [
     "day-cell",
     mark ? "has-calendar-mark" : "",
@@ -965,10 +1190,10 @@ function renderEmotionTab() {
       <section class="section">
         <div class="challenge-panel challenge-cleared">
         <div class="challenge-summary">
-          <span>챌린지</span>
-          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">갤러리</button>
+          <span>Challenge</span>
+          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">Gallery</button>
         </div>
-        <div class="challenge-complete">모든 레벨 클리어</div>
+        <div class="challenge-complete">All levels cleared</div>
         </div>
       </section>
     `;
@@ -984,10 +1209,10 @@ function renderEmotionTab() {
       <div class="challenge-panel">
         <div class="challenge-summary">
           <span class="challenge-level-label">
-            레벨 ${active.index + 1}
+            Level ${active.index + 1}
             <span class="challenge-layer-count">(${active.filledCount}/${active.level.layerCount})</span>
           </span>
-          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">갤러리</button>
+          <button type="button" class="challenge-gallery-button" data-action="open-challenge-gallery">Gallery</button>
         </div>
         <div class="challenge-progress-bar" aria-hidden="true">
           <span style="width:${challengeProgressPercent(active)}%;"></span>
@@ -1088,7 +1313,7 @@ async function renderChallengeCanvas(level, token = state.challengeRenderToken) 
     if (token !== state.challengeRenderToken || canvas.dataset.levelId !== level.id) return;
     drawChallengeCanvas(canvas, level, analysis);
   } catch (error) {
-    setStatus(error.message || "챌린지 그림을 불러오지 못했습니다.");
+    setStatus(error.message || "Could not load the challenge image.");
   }
 }
 
@@ -1125,7 +1350,7 @@ function loadChallengeImage(level) {
   const promise = new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("챌린지 이미지를 불러오지 못했습니다."));
+    image.onerror = () => reject(new Error("Could not load the challenge image."));
     image.src = level.image;
   });
 
@@ -1276,7 +1501,7 @@ async function awardChallengeFill() {
   const layer = randomChoice(candidates);
   const color = randomChoice(CHALLENGE_COLORS);
   if (!color) {
-    return "챌린지 색상을 선택하지 못했습니다.";
+    return "Could not choose a challenge color.";
   }
 
   const nextFilledCount = active.filledCount + 1;
@@ -1287,7 +1512,7 @@ async function awardChallengeFill() {
     await api("/api/items", {
       method: "POST",
       body: {
-        title: `챌린지 레벨 ${active.index + 1} 레이어 ${layer + 1}`,
+        title: `Challenge Level ${active.index + 1} Layer ${layer + 1}`,
         type: "감정",
         date: todayString(),
         completed: true,
@@ -1303,9 +1528,9 @@ async function awardChallengeFill() {
 
     state.selectedChallengeLayer = null;
     state.challengeAnalysis = null;
-    return cleared ? "레벨 클리어. 다음 레벨로 이동했습니다." : "챌린지 기록을 저장했습니다.";
+    return cleared ? "Level cleared. Moving to the next level." : "Challenge progress saved.";
   } catch (error) {
-    return error.message || "챌린지 기록을 저장하지 못했습니다.";
+    return error.message || "Could not save challenge progress.";
   } finally {
     state.challengeSaving = false;
   }
@@ -1326,6 +1551,67 @@ function hexToRgb(hex) {
     g: (value >> 8) & 255,
     b: value & 255
   };
+}
+
+function storedAuthMood() {
+  try {
+    return window.localStorage.getItem(AUTH_MOOD_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeAuthMood(emotion) {
+  try {
+    window.localStorage.setItem(AUTH_MOOD_STORAGE_KEY, emotion);
+  } catch {
+    // The selected color still applies for this session even if storage is unavailable.
+  }
+}
+
+function applyStoredAuthMood() {
+  applyAuthMood(storedAuthMood());
+}
+
+function applyAuthMood(emotion) {
+  const palette = emotionPalette(emotion);
+  const root = document.documentElement;
+
+  if (!palette) {
+    root.style.removeProperty("--auth-bg-start");
+    root.style.removeProperty("--auth-bg-mid");
+    root.style.removeProperty("--auth-bg-end");
+    root.style.removeProperty("--auth-bg-glow");
+    root.style.removeProperty("--auth-bg-glow-rgb");
+    return;
+  }
+
+  const color = hexToRgb(palette.color);
+  const deepSepia = { r: 20, g: 9, b: 2 };
+  const warmSepia = { r: 82, g: 42, b: 12 };
+
+  root.style.setProperty("--auth-bg-start", rgbString(mixRgb(deepSepia, color, 0.22)));
+  root.style.setProperty("--auth-bg-mid", rgbString(mixRgb(warmSepia, color, 0.58)));
+  root.style.setProperty("--auth-bg-end", rgbString(mixRgb(deepSepia, color, 0.18)));
+  root.style.setProperty("--auth-bg-glow", rgbString(mixRgb(warmSepia, color, 0.72)));
+  root.style.setProperty("--auth-bg-glow-rgb", rgbChannels(mixRgb(warmSepia, color, 0.72)));
+}
+
+function mixRgb(base, color, amount) {
+  const ratio = Math.max(0, Math.min(1, amount));
+  return {
+    r: Math.round(base.r + (color.r - base.r) * ratio),
+    g: Math.round(base.g + (color.g - base.g) * ratio),
+    b: Math.round(base.b + (color.b - base.b) * ratio)
+  };
+}
+
+function rgbString(rgb) {
+  return `rgb(${rgb.r} ${rgb.g} ${rgb.b})`;
+}
+
+function rgbChannels(rgb) {
+  return `${rgb.r}, ${rgb.g}, ${rgb.b}`;
 }
 
 function hslToHex(hue, saturation, lightness) {
@@ -1351,7 +1637,7 @@ function openChallengeGallery() {
   const active = activeChallengeLevel(progress);
   const activeIndex = active ? active.index : CHALLENGE_LEVELS.length;
 
-  els.emotionDialogTitle.textContent = "갤러리";
+  els.emotionDialogTitle.textContent = "Gallery";
   els.emotionDialogContent.innerHTML = renderChallengeGallery(progress, activeIndex);
   if (!els.emotionDialog.open) {
     els.emotionDialog.showModal();
@@ -1372,7 +1658,7 @@ function renderChallengeGallery(progress, activeIndex) {
           return `
             <div class="challenge-gallery-card locked">
               <div class="challenge-gallery-mask">?</div>
-              <span>레벨 ${index + 1}</span>
+              <span>Level ${index + 1}</span>
             </div>
           `;
         }
@@ -1381,7 +1667,7 @@ function renderChallengeGallery(progress, activeIndex) {
           <div class="challenge-gallery-card ${cleared ? "cleared" : "current"}">
             <canvas class="challenge-gallery-canvas" data-gallery-level-id="${level.id}"></canvas>
             <div class="challenge-gallery-meta">
-              <span>레벨 ${index + 1}</span>
+              <span>Level ${index + 1}</span>
               <strong>${cleared ? "CLEAR" : `${filledCount}/${level.layerCount}`}</strong>
             </div>
           </div>
@@ -1414,7 +1700,7 @@ function renderCalendarScheduleChips(schedules, date, scheduleRows = {}) {
 
   const decorated = calendarDecoratedSchedules(schedules, date, scheduleRows);
 
-  return decorated.map(({ rangeClass, row, schedule, selected, showTitle, title }) => {
+  return decorated.map(({ rangeClass, resizing, row, schedule, selected, showTitle, title }) => {
     const label = showTitle ? escapeHtml(title) : "&nbsp;";
     const rangeTokens = rangeClass.split(/\s+/);
     const canResizeStart = selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-start"));
@@ -1423,7 +1709,8 @@ function renderCalendarScheduleChips(schedules, date, scheduleRows = {}) {
       "schedule-chip",
       rangeClass,
       showTitle ? "has-title" : "continuation",
-      selected ? "selected" : ""
+      selected ? "selected" : "",
+      resizing ? "resizing" : ""
     ].join(" ");
 
     return `
@@ -1448,17 +1735,18 @@ function calendarDecoratedSchedules(schedules, date, scheduleRows = {}) {
     const rangeClass = calendarScheduleRangeClass(schedule, date);
     const rangeTokens = rangeClass.split(/\s+/);
     const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
-    const title = String(schedule.title || "").trim() || "제목 없음";
+    const title = String(schedule.title || "").trim() || "Untitled";
     const selected = selectedCalendarScheduleMatches(schedule.id);
+    const resizing = calendarScheduleIsResizing(schedule.id);
     const row = scheduleRows[schedule.id] || 0;
 
-    return { rangeClass, row, schedule, showTitle, title, selected };
+    return { rangeClass, resizing, row, schedule, showTitle, title, selected };
   });
 }
 
 function calendarScheduleDisplayRowCount(days, scheduleRows = {}) {
   const counts = days.map((day) => {
-    const schedules = itemsFor("일정", day.date).sort(byStartTime);
+    const schedules = calendarSchedulesForDate(day.date).sort(byStartTime);
     if (!schedules.length) return 2;
 
     const decorated = calendarDecoratedSchedules(schedules, day.date, scheduleRows);
@@ -1468,14 +1756,28 @@ function calendarScheduleDisplayRowCount(days, scheduleRows = {}) {
   return Math.max(2, ...counts);
 }
 
-function calendarScheduleRows(days) {
+function calendarScheduleRows(days, previewItem = null) {
+  const schedules = calendarScheduleItemsForRows(days, previewItem?.id);
+  if (previewItem && isItemRangeOnCalendar(previewItem, days[0]?.date, days[days.length - 1]?.date)) {
+    schedules.push(previewItem);
+  }
+  schedules.sort(byCalendarScheduleOrder);
+  return assignCalendarScheduleRows(schedules);
+}
+
+function calendarScheduleItemsForRows(days, excludedId = null) {
   const rangeStart = days[0]?.date;
   const rangeEnd = days[days.length - 1]?.date;
-  if (!rangeStart || !rangeEnd) return {};
+  if (!rangeStart || !rangeEnd) return [];
 
-  const schedules = state.items
-    .filter((item) => item.type === "일정" && isItemRangeOnCalendar(item, rangeStart, rangeEnd))
+  return state.items
+    .filter((item) => item.type === "일정" && item.id !== excludedId)
+    .map(calendarScheduleVisualItem)
+    .filter((item) => isItemRangeOnCalendar(item, rangeStart, rangeEnd))
     .sort(byCalendarScheduleOrder);
+}
+
+function assignCalendarScheduleRows(schedules) {
   const rows = {};
   const rowEndDates = [];
 
@@ -1490,6 +1792,75 @@ function calendarScheduleRows(days) {
   return rows;
 }
 
+function calendarSchedulePreviewPlacement(item, startDate, endDate) {
+  const range = selectedDateRange(startDate, endDate);
+  const previewItem = {
+    ...item,
+    date: range.startDate,
+    endDate: range.endDate
+  };
+  const blockedRows = calendarScheduleOccupiedRows(range, item.id);
+
+  let row = 0;
+  while (blockedRows.has(row)) row += 1;
+
+  const rowCount = Math.max(calendarScheduleCurrentRowCount(), row + 1);
+  return { previewItem, row, rowCount };
+}
+
+function calendarScheduleOccupiedRows(range, excludedId) {
+  const rows = new Set();
+
+  document.querySelectorAll(".schedule-calendar .schedule-chip[data-id]").forEach((chip) => {
+    if (
+      chip.dataset.id === excludedId ||
+      chip.classList.contains("schedule-drag-preview") ||
+      chip.classList.contains("schedule-resize-preview")
+    ) return;
+
+    const date = chip.dataset.date;
+    if (!date || date < range.startDate || date > range.endDate) return;
+    rows.add(Number(chip.style.getPropertyValue("--schedule-row")) || 0);
+  });
+
+  return rows;
+}
+
+function calendarScheduleCurrentRowCount() {
+  const grid = document.querySelector(".schedule-calendar");
+  const gridRowCount = Number(
+    grid?.style.getPropertyValue("--schedule-row-count") ||
+    (grid ? getComputedStyle(grid).getPropertyValue("--schedule-row-count") : "")
+  ) || 2;
+  const chipRows = [...document.querySelectorAll(".schedule-calendar .schedule-chip[data-id]")]
+    .filter((chip) => !chip.classList.contains("schedule-drag-preview") && !chip.classList.contains("schedule-resize-preview"))
+    .map((chip) => (Number(chip.style.getPropertyValue("--schedule-row")) || 0) + 1);
+
+  return Math.max(2, gridRowCount, ...chipRows);
+}
+
+function applyCalendarScheduleRowCount(rowCount) {
+  const grid = document.querySelector(".schedule-calendar");
+  if (!grid) return;
+
+  const weekCount = Number(
+    grid.style.getPropertyValue("--calendar-week-count") ||
+    getComputedStyle(grid).getPropertyValue("--calendar-week-count")
+  ) || 6;
+
+  calendarZoomStyle(rowCount, weekCount).split(";").forEach((rule) => {
+    const [property, value] = rule.split(":");
+    if (!property || !value) return;
+    grid.style.setProperty(property.trim(), value.trim());
+  });
+}
+
+function resetCalendarScheduleRowCount() {
+  const days = calendarDays(state.visibleMonth);
+  const rows = calendarScheduleRows(days);
+  applyCalendarScheduleRowCount(calendarScheduleDisplayRowCount(days, rows));
+}
+
 function byCalendarScheduleOrder(left, right) {
   const leftRange = selectedDateRange(left.date, left.endDate || left.date);
   const rightRange = selectedDateRange(right.date, right.endDate || right.date);
@@ -1497,11 +1868,33 @@ function byCalendarScheduleOrder(left, right) {
     calendarScheduleTimeValue(left.startTime) - calendarScheduleTimeValue(right.startTime) ||
     calendarScheduleTimeValue(left.endTime) - calendarScheduleTimeValue(right.endTime) ||
     rightRange.endDate.localeCompare(leftRange.endDate) ||
-    String(left.title || "").localeCompare(String(right.title || ""), "ko");
+    String(left.title || "").localeCompare(String(right.title || ""), "en");
 }
 
 function calendarScheduleTimeValue(time) {
   return isTimeString(time) ? timeToMinutes(time) : 24 * 60;
+}
+
+function calendarSchedulesForDate(date) {
+  return state.items
+    .filter((item) => item.type === "일정")
+    .map(calendarScheduleVisualItem)
+    .filter((item) => isItemOnDate(item, date));
+}
+
+function calendarScheduleVisualItem(item) {
+  const resize = state.calendarScheduleResize;
+  if (!resize || !resize.moved || resize.id !== item.id) return item;
+
+  return {
+    ...item,
+    date: resize.targetStartDate,
+    endDate: resize.targetEndDate
+  };
+}
+
+function calendarScheduleIsResizing(id) {
+  return Boolean(state.calendarScheduleResize?.moved && state.calendarScheduleResize.id === id);
 }
 
 function isItemRangeOnCalendar(item, startDate, endDate) {
@@ -1569,7 +1962,7 @@ function renderRoutines() {
   els.routinesTab.innerHTML = `
     <section class="section">
       <div class="section-header">
-        <h2>루틴</h2>
+        <h2>Routine</h2>
       </div>
       ${renderRoutineList(routines, true)}
     </section>
@@ -1577,7 +1970,7 @@ function renderRoutines() {
 }
 
 function renderItemList(items, mode) {
-  if (!items.length) return `<div class="empty">등록된 항목이 없습니다.</div>`;
+  if (!items.length) return `<div class="empty">No items yet.</div>`;
 
   return `
     <div class="item-list">
@@ -1589,7 +1982,7 @@ function renderItemList(items, mode) {
 function renderItem(item, mode) {
   const check = mode === "task" || item.type === "할일"
     ? `<button type="button" class="checkbox" data-action="toggle-task" data-id="${item.id}">${item.completed ? '<span class="checkmark">✓</span>' : ""}</button>`
-    : `<span class="tag">${escapeHtml(item.type || "")}</span>`;
+    : `<span class="tag">${escapeHtml(displayType(item.type))}</span>`;
 
   return `
     <div class="item ${item.completed ? "done" : ""}">
@@ -1605,14 +1998,14 @@ function renderItem(item, mode) {
 
 function renderRoutineList(routines, showAll) {
   const list = showAll ? routines : routines.filter((routine) => isRoutineActive(routine, state.selectedDate));
-  if (!list.length) return `<div class="empty">등록된 루틴이 없습니다.</div>`;
+  if (!list.length) return `<div class="empty">No routines yet.</div>`;
 
   return `
     <div class="item-list">
       ${list.map((routine) => {
         return `
           <div class="item">
-            <span class="tag">루틴</span>
+            <span class="tag">Routine</span>
             <button type="button" class="item-main-button" data-action="edit" data-id="${routine.id}">
               <span class="item-title">${escapeHtml(routine.title)}</span>
               <span class="item-meta">${routineMeta(routine)}</span>
@@ -1632,17 +2025,17 @@ function renderEmotionCheck(emotion) {
 
   return `
     <div class="emotion-panel">
-      <div class="emotion-grid" aria-label="감정 색상 선택">
+      <div class="emotion-grid" aria-label="Emotion color selection">
         ${EMOTION_GROUPS.map((group) => `
-          <div class="emotion-row" aria-label="${group.name}">
+          <div class="emotion-row" aria-label="${displayEmotion(group.name)}">
             ${group.options.map((option) => `
               <button
                 type="button"
                 class="emotion-button ${normalizedEmotion === option.value ? "selected" : ""}"
                 data-action="set-emotion"
                 data-emotion="${option.value}"
-                aria-label="${option.value}"
-                title="${option.value}"
+                aria-label="${displayEmotion(option.value)}"
+                title="${displayEmotion(option.value)}"
                 style="--emotion-swatch:${option.color}; --emotion-swatch-border:${option.border};"
               >
                 <span class="emotion-dot" aria-hidden="true"></span>
@@ -1652,11 +2045,11 @@ function renderEmotionCheck(emotion) {
         `).join("")}
       </div>
       <label>
-        코멘트
+        Comment
         <textarea id="emotionComment" rows="3" maxlength="2000">${escapeHtml(note)}</textarea>
       </label>
       <div class="emotion-actions">
-        <button type="button" class="primary" data-action="save-emotion-comment">코멘트 저장</button>
+        <button type="button" class="primary" data-action="save-emotion-comment">Save Comment</button>
       </div>
     </div>
   `;
@@ -1676,11 +2069,11 @@ function renderCalendarEmotionPreview(emotion) {
   const style = palette
     ? ` style="--emotion-bg:${palette.color}; --emotion-border:${palette.border}; --emotion-text:${palette.text};"`
     : "";
-  const comment = emotion.note ? escapeHtml(emotion.note) : "코멘트 없음";
+  const comment = emotion.note ? escapeHtml(emotion.note) : "No comment";
 
   return `
-    <div class="emotion-preview"${style} aria-label="감정 코멘트">
-      <span class="emotion-preview-label">감정 코멘트</span>
+    <div class="emotion-preview"${style} aria-label="Emotion comment">
+      <span class="emotion-preview-label">Emotion Comment</span>
       <p class="emotion-preview-comment">${comment}</p>
     </div>
   `;
@@ -1691,19 +2084,76 @@ function itemMeta(item) {
   if (item.date) parts.push(item.date);
   if (item.endDate && item.endDate !== item.date) parts[parts.length - 1] = `${item.date}~${item.endDate}`;
   if (item.startTime) parts.push(`${item.startTime}-${item.endTime || ""}`);
-  if (item.emotion || item.mood) parts.push(item.emotion || item.mood);
+  if (item.emotion || item.mood) parts.push(displayEmotion(item.emotion || item.mood));
   return parts.map(escapeHtml).join(" · ");
+}
+
+function rememberItemDialogReturnTarget() {
+  state.itemDialogReturnTarget = els.calendarTimelineDialog.open ? "calendar-timeline" : null;
+}
+
+function handleItemDialogClose() {
+  closePicker();
+  if (state.itemDialogSaveInProgress) return;
+  restoreItemDialogReturnTarget();
+}
+
+function restoreItemDialogReturnTarget() {
+  const target = state.itemDialogReturnTarget;
+  state.itemDialogReturnTarget = null;
+  if (target !== "calendar-timeline") return;
+  if (!state.authenticated || state.tab !== "calendar") return;
+
+  window.setTimeout(() => {
+    if (!state.authenticated || state.tab !== "calendar" || els.dialog.open || els.calendarTimelineDialog.open) return;
+    openCalendarTimelineDialog();
+  }, 0);
+}
+
+function closeItemDialogOnOutsidePointer(event) {
+  if (!els.dialog.open || state.itemDialogSaveInProgress) return;
+  if (itemDialogPointerInsideBody(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  cancelItemDialog();
+}
+
+function itemDialogPointerInsideBody(event) {
+  const rect = els.itemForm.getBoundingClientRect();
+  const hasPoint = Number.isFinite(event.clientX) && Number.isFinite(event.clientY);
+  if (hasPoint) {
+    return (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    );
+  }
+  return Boolean(event.target?.closest?.("#itemDialog .item-dialog-body"));
+}
+
+function handleItemDialogBackdropPress(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  cancelItemDialog();
+}
+
+function cancelItemDialog() {
+  if (!els.dialog.open || state.itemDialogSaveInProgress) return;
+  closePicker();
+  els.dialog.close();
 }
 
 function openItemDialog(type, item, defaults = {}) {
   state.editingItem = item || null;
   const selectedType = item ? item.type : type || "일정";
   closePicker();
+  rememberItemDialogReturnTarget();
   if (els.calendarTimelineDialog.open) {
     els.calendarTimelineDialog.close();
   }
 
-  els.dialogTitle.textContent = item ? "수정" : "추가";
+  els.dialogTitle.textContent = item ? "Edit" : "Add";
   els.editingId.value = item ? item.id : "";
   els.typeInput.value = selectedType;
   els.titleInput.value = item ? item.title : "";
@@ -1757,15 +2207,15 @@ function updateFormVisibility() {
 function syncDateTimeFieldLabels(type) {
   const startDateLabel = document.querySelector("#startDateLabel");
   const endDateLabel = document.querySelector("#endDateLabel");
-  if (startDateLabel) startDateLabel.textContent = type === "일정" ? "시작일" : "날짜";
-  if (endDateLabel) endDateLabel.textContent = type === "일정" ? "마감일" : "날짜";
+  if (startDateLabel) startDateLabel.textContent = type === "일정" ? "Start date" : "Date";
+  if (endDateLabel) endDateLabel.textContent = type === "일정" ? "End date" : "Date";
 
-  els.startTimeLabel.textContent = type === "일정" ? "시간선택" : "시작";
+  els.startTimeLabel.textContent = type === "일정" ? "Time" : "Start";
   els.endTimeLabel.textContent = type === "일정"
-    ? "시간선택"
+    ? "Time"
     : type === "할일"
-      ? "마감"
-      : "종료";
+      ? "Due"
+      : "End";
 }
 
 function applyAllDayTime() {
@@ -1791,10 +2241,23 @@ function syncTypeChoices(type = els.typeInput.value) {
   });
 }
 
-function openPicker(input) {
+function openPickerFromPointer(event, input) {
+  event.preventDefault();
+  event.stopPropagation();
+  openPicker(input, { blurTarget: true });
+}
+
+function openPickerFromClick(event, input) {
+  event.preventDefault();
+  event.stopPropagation();
+  openPicker(input, { blurTarget: true });
+}
+
+function openPicker(input, options = {}) {
   if (!input || input.disabled || !els.dialog.open) return;
   const type = input.dataset.picker;
   if (type !== "date" && type !== "time") return;
+  if (options.blurTarget && document.activeElement === input) input.blur();
 
   const selectedValue = input.value || defaultPickerValue(input);
   state.picker = {
@@ -1803,8 +2266,31 @@ function openPicker(input) {
     visibleMonth: type === "date" ? monthStart(selectedValue) : null
   };
 
-  els.dateFields.append(els.pickerPanel);
+  els.itemForm.append(els.pickerPanel);
+  positionPickerPanel();
   renderPickerPanel();
+}
+
+function positionPickerPanel() {
+  if (!els.pickerPanel || !els.itemForm || !els.dateFields) return;
+  const formRect = els.itemForm.getBoundingClientRect();
+  const anchorRect = els.dateFields.getBoundingClientRect();
+  const dialogRect = els.dialog.getBoundingClientRect();
+  const preferredHeight = state.picker?.type === "time" ? 290 : 330;
+  const visualTopLimit = formRect.top + 12;
+  const visualBottomLimit = Math.min(
+    window.innerHeight || document.documentElement.clientHeight || 720,
+    dialogRect.bottom
+  ) - 12;
+  const naturalVisualTop = anchorRect.bottom + 8;
+  const visualTop = Math.max(
+    visualTopLimit,
+    Math.min(naturalVisualTop, visualBottomLimit - preferredHeight)
+  );
+  const top = Math.max(12, visualTop - formRect.top + els.itemForm.scrollTop);
+  const maxHeight = Math.max(220, visualBottomLimit - visualTop);
+  els.pickerPanel.style.setProperty("--picker-top", `${Math.round(top)}px`);
+  els.pickerPanel.style.setProperty("--picker-max-height", `${Math.round(maxHeight)}px`);
 }
 
 function closePicker() {
@@ -1815,6 +2301,8 @@ function closePicker() {
   if (!els.pickerPanel) return;
   els.pickerPanel.hidden = true;
   els.pickerPanel.innerHTML = "";
+  els.pickerPanel.style.removeProperty("--picker-top");
+  els.pickerPanel.style.removeProperty("--picker-max-height");
 }
 
 function closePickerOnOutsidePointer(event) {
@@ -1868,9 +2356,9 @@ function renderDatePicker() {
 
   return `
     <div class="picker-header">
-      <button type="button" class="picker-icon-button" data-picker-action="date-month-prev" aria-label="이전 달">‹</button>
+      <button type="button" class="picker-icon-button" data-picker-action="date-month-prev" aria-label="Previous month">‹</button>
       <strong>${monthLabel}</strong>
-      <button type="button" class="picker-icon-button" data-picker-action="date-month-next" aria-label="다음 달">›</button>
+      <button type="button" class="picker-icon-button" data-picker-action="date-month-next" aria-label="Next month">›</button>
     </div>
     <div class="picker-calendar-grid">
       ${DAYS.map((day) => `<span class="picker-weekday">${day}</span>`).join("")}
@@ -1888,7 +2376,7 @@ function renderDatePicker() {
       }).join("")}
     </div>
     <div class="picker-footer">
-      <button type="button" class="secondary" data-picker-action="picker-close">닫기</button>
+      <button type="button" class="secondary" data-picker-action="picker-close">Close</button>
     </div>
   `;
 }
@@ -1917,17 +2405,16 @@ function renderTimePicker() {
   return `
     <div class="picker-header picker-header-simple google-time-picker-header">
       <strong>${timePickerTitle(input)}</strong>
-      <button type="button" class="dialog-text-button primary-text" data-picker-action="picker-close">완료</button>
+      <button type="button" class="dialog-text-button primary-text" data-picker-action="picker-close">Done</button>
     </div>
-    <div class="time-picker-current">${formatKoreanTime(selectedTime)}</div>
-    <div class="time-wheel" aria-label="시간 선택">
-      <div class="time-wheel-column" aria-label="오전 오후" data-wheel-kind="period" data-wheel-middle-copy="0">
+    <div class="time-wheel" aria-label="Time selection">
+      <div class="time-wheel-column" aria-label="AM PM" data-wheel-kind="period" data-wheel-middle-copy="0">
         ${renderLoopingTimeWheelOptions(periodOptions, selectedTime, 1, "period")}
       </div>
-      <div class="time-wheel-column" aria-label="시" data-wheel-kind="hour" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
+      <div class="time-wheel-column" aria-label="Hour" data-wheel-kind="hour" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
         ${renderLoopingTimeWheelOptions(hourOptions, selectedTime, TIME_WHEEL_LOOP_COPIES, "hour")}
       </div>
-      <div class="time-wheel-column" aria-label="분" data-wheel-kind="minute" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
+      <div class="time-wheel-column" aria-label="Minute" data-wheel-kind="minute" data-wheel-middle-copy="${middleWheelCopy(TIME_WHEEL_LOOP_COPIES)}">
         ${renderLoopingTimeWheelOptions(minuteOptions, selectedTime, TIME_WHEEL_LOOP_COPIES, "minute")}
       </div>
     </div>
@@ -1935,8 +2422,8 @@ function renderTimePicker() {
 }
 
 function timePickerTitle(input) {
-  if (!input || input.id !== "endTimeInput") return "시작 시간";
-  return els.typeInput.value === "할일" ? "마감 시간" : "종료 시간";
+  if (!input || input.id !== "endTimeInput") return "Start Time";
+  return els.typeInput.value === "할일" ? "Due Time" : "End Time";
 }
 
 function renderLoopingTimeWheelOptions(options, selectedTime, copyCount = 3, part = "") {
@@ -2110,9 +2597,6 @@ function updateTimePickerSelection() {
 
   const options = pickerTimeOptions(input);
   const selectedTime = nearestPickerTime(isTimeString(input.value) ? input.value : defaultPickerValue(input), options);
-  const current = els.pickerPanel.querySelector(".time-picker-current");
-  if (current) current.textContent = formatKoreanTime(selectedTime);
-
   els.pickerPanel.querySelectorAll(".time-wheel-option").forEach((option) => {
     const part = option.dataset.wheelPart;
     if (part === "period" || part === "hour" || part === "minute") {
@@ -2319,6 +2803,10 @@ function normalizeTimeRangeAfterPicker(targetId) {
 
 async function saveItem(event) {
   event.preventDefault();
+  if (event.submitter?.dataset.dialogAction === "cancel") {
+    cancelItemDialog();
+    return;
+  }
   closePicker();
   const type = els.typeInput.value;
   const id = els.editingId.value;
@@ -2342,6 +2830,9 @@ async function saveItem(event) {
     payload.repeatDays = [...document.querySelectorAll('[name="repeatDay"]:checked')].map((input) => input.value);
   }
 
+  state.itemDialogSaveInProgress = true;
+  let saved = false;
+
   try {
     if (id) {
       await api("/api/items", {
@@ -2354,24 +2845,35 @@ async function saveItem(event) {
         body: payload
       });
     }
+    saved = true;
     els.dialog.close();
     await loadItems();
   } catch (error) {
-    setStatus(error.message || "저장하지 못했습니다.");
+    setStatus(error.message || "Could not save.");
+  } finally {
+    state.itemDialogSaveInProgress = false;
+    if (saved && !els.dialog.open) restoreItemDialogReturnTarget();
   }
 }
 
 async function deleteCurrentItem() {
   const id = els.editingId.value;
   if (!id) return;
-  if (!window.confirm("삭제할까요?")) return;
+  if (!window.confirm("Delete this item?")) return;
+
+  state.itemDialogSaveInProgress = true;
+  let deleted = false;
 
   try {
     await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    deleted = true;
     els.dialog.close();
     await loadItems();
   } catch (error) {
-    setStatus(error.message || "삭제하지 못했습니다.");
+    setStatus(error.message || "Could not delete.");
+  } finally {
+    state.itemDialogSaveInProgress = false;
+    if (deleted && !els.dialog.open) restoreItemDialogReturnTarget();
   }
 }
 
@@ -2437,7 +2939,7 @@ async function toggleRoutine(id) {
     await api("/api/items", {
       method: "POST",
       body: {
-        title: `${routine.title} 기록`,
+        title: `${routine.title} log`,
         type: "루틴기록",
         date: state.selectedDate,
         completed,
@@ -2453,11 +2955,11 @@ async function toggleRoutine(id) {
 }
 
 function startTimeSelection(event) {
+  if (state.suppressTimeSelectionPointerId === event.pointerId) return;
+
   const slot = event.target.closest("[data-time-slot]");
   if (
     !slot ||
-    event.target.closest(".slot-time") ||
-    isTimelineTimeRailPointer(event, slot) ||
     event.target.closest("button, input, textarea, select")
   ) return;
   const context = timelineContextFromSlot(slot);
@@ -2467,6 +2969,20 @@ function startTimeSelection(event) {
     state.selectedDate,
     slot.dataset.timeSlot
   );
+  if (document.querySelector(".slot.selected") && !slot.classList.contains("selected")) {
+    clearSelectedTimeRangeOnly();
+    suppressTimeSelectionForPointer(event.pointerId);
+    return;
+  }
+  if (
+    state.selectedTimeRange &&
+    !startsFromSelectedRange
+  ) {
+    clearSelectedTimeRangeOnly();
+    suppressTimeSelectionForPointer(event.pointerId);
+    return;
+  }
+
   const holdDelay = event.pointerType === "touch" && !startsFromSelectedRange
     ? TIMELINE_TOUCH_HOLD_DELAY
     : 0;
@@ -2497,6 +3013,7 @@ function startTimeSelection(event) {
 
   if (holdDelay === 0) {
     markSelectedTimeSlots();
+    event.preventDefault();
     return;
   }
 
@@ -2505,12 +3022,6 @@ function startTimeSelection(event) {
     state.timeSelection.active = true;
     markSelectedTimeSlots();
   }, holdDelay);
-}
-
-function isTimelineTimeRailPointer(event, slot) {
-  const body = slot.querySelector(".slot-body");
-  if (!body) return false;
-  return event.clientX < body.getBoundingClientRect().left;
 }
 
 function moveTimeSelection(event) {
@@ -2528,6 +3039,8 @@ function moveTimeSelection(event) {
       state.timeSelection.scrolling = state.timeSelection.pointerType === "touch";
       window.clearTimeout(state.timeSelectionHoldTimer);
       state.timeSelectionHoldTimer = null;
+      clearSelectedTimeRangeOnly();
+      suppressTimeSelectionForPointer(event.pointerId);
       scrollTimelineTouchGesture(event);
     }
     return;
@@ -2540,6 +3053,7 @@ function moveTimeSelection(event) {
 
   state.timeSelection.currentTime = target.dataset.timeSlot;
   markSelectedTimeSlots();
+  event.preventDefault();
 }
 
 function scrollTimelineTouchGesture(event) {
@@ -2564,6 +3078,16 @@ function timelineScrollContainer(slot) {
 }
 
 function finishTimeSelection(event) {
+  if (state.suppressTimeSelectionPointerId === event.pointerId) {
+    if (state.timeSelection?.pointerId === event.pointerId) {
+      window.clearTimeout(state.timeSelectionHoldTimer);
+      state.timeSelectionHoldTimer = null;
+      state.timeSelection = null;
+      clearSelectedTimeSlots();
+    }
+    clearSuppressedTimeSelectionPointer(event.pointerId);
+    return;
+  }
   if (!state.timeSelection || state.timeSelection.pointerId !== event.pointerId) return;
 
   const selection = state.timeSelection;
@@ -2602,6 +3126,7 @@ function finishTimeSelection(event) {
 }
 
 function cancelTimeSelection() {
+  if (state.timeSelection) clearSuppressedTimeSelectionPointer(state.timeSelection.pointerId);
   window.clearTimeout(state.timeSelectionHoldTimer);
   state.timeSelectionHoldTimer = null;
   state.timeSelection = null;
@@ -2636,7 +3161,11 @@ function startTimelineItemResize(event) {
     startY: event.clientY,
     moved: false
   };
-  handle.setPointerCapture?.(event.pointerId);
+  try {
+    handle.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can fail when the browser does not consider the pointer active.
+  }
   event.preventDefault();
   event.stopPropagation();
 }
@@ -2682,7 +3211,7 @@ async function finishTimelineItemResize(event) {
   try {
     await updateTimelineItemTime(item, startTime, endTime);
   } catch (error) {
-    setStatus(error.message || "시간을 변경하지 못했습니다.");
+    setStatus(error.message || "Could not update the time.");
     render();
   }
 }
@@ -2754,7 +3283,7 @@ async function finishTimelineItemDrag(event) {
   try {
     await updateTimelineItemTime(item, startTime, endTime);
   } catch (error) {
-    setStatus(error.message || "시간을 변경하지 못했습니다.");
+    setStatus(error.message || "Could not update the time.");
     render();
   }
 }
@@ -2900,6 +3429,7 @@ function selectCalendarSchedule(id, date) {
   const item = findItem(id);
   if (!item || item.type !== "일정") return;
   state.selectedCalendarSchedule = { id };
+  state.calendarSelectedDate = null;
   state.selectedDate = date || item.date || state.selectedDate;
   clearSelectedTimelineRange();
   render();
@@ -2929,9 +3459,14 @@ function startCalendarScheduleResize(event) {
     targetEndDate: range.endDate,
     startX: event.clientX,
     startY: event.clientY,
+    row: Number(chip.style.getPropertyValue("--schedule-row")) || 0,
     moved: false
   };
-  handle.setPointerCapture?.(event.pointerId);
+  try {
+    handle.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can fail when the browser does not consider the pointer active.
+  }
   event.preventDefault();
   event.stopPropagation();
 }
@@ -2939,13 +3474,14 @@ function startCalendarScheduleResize(event) {
 function moveCalendarScheduleResize(event) {
   if (!state.calendarScheduleResize || state.calendarScheduleResize.pointerId !== event.pointerId) return;
 
-  const distance = Math.abs(event.clientX - state.calendarScheduleResize.startX) + Math.abs(event.clientY - state.calendarScheduleResize.startY);
-  if (distance <= 8 && !state.calendarScheduleResize.moved) return;
+  const resize = state.calendarScheduleResize;
+  const distance = Math.abs(event.clientX - resize.startX) + Math.abs(event.clientY - resize.startY);
+  if (distance <= 8 && !resize.moved) return;
 
-  state.calendarScheduleResize.moved = true;
-  state.calendarScheduleResize.element.classList.add("resizing");
-  updateCalendarScheduleResizeTarget(event);
-  markCalendarScheduleResizeDates();
+  const wasMoved = resize.moved;
+  resize.moved = true;
+  const changed = updateCalendarScheduleResizeTarget(event);
+  if (!wasMoved || changed) renderCalendarScheduleResizePreview();
   event.preventDefault();
 }
 
@@ -2971,7 +3507,7 @@ async function finishCalendarScheduleResize(event) {
   try {
     await updateCalendarScheduleRange(item, startDate, endDate);
   } catch (error) {
-    setStatus(error.message || "일정 기간을 변경하지 못했습니다.");
+    setStatus(error.message || "Could not update the event range.");
     render();
   }
 }
@@ -3003,21 +3539,29 @@ function startCalendarScheduleDrag(event) {
     targetEndDate: range.endDate,
     startX: event.clientX,
     startY: event.clientY,
+    row: Number(chip.style.getPropertyValue("--schedule-row")) || 0,
     moved: false
   };
-  chip.setPointerCapture?.(event.pointerId);
+  try {
+    chip.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can fail when the browser does not consider the pointer active.
+  }
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function moveCalendarScheduleDrag(event) {
   if (!state.calendarScheduleDrag || state.calendarScheduleDrag.pointerId !== event.pointerId) return;
 
-  const distance = Math.abs(event.clientX - state.calendarScheduleDrag.startX) + Math.abs(event.clientY - state.calendarScheduleDrag.startY);
-  if (distance <= 8 && !state.calendarScheduleDrag.moved) return;
+  const drag = state.calendarScheduleDrag;
+  const distance = Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY);
+  if (distance <= 8 && !drag.moved) return;
 
-  state.calendarScheduleDrag.moved = true;
-  state.calendarScheduleDrag.element.classList.add("dragging");
-  updateCalendarScheduleDragTarget(event);
-  markCalendarScheduleDragDates();
+  const wasMoved = drag.moved;
+  drag.moved = true;
+  const changed = updateCalendarScheduleDragTarget(event);
+  if (!wasMoved || changed) renderCalendarScheduleDragPreview();
   event.preventDefault();
 }
 
@@ -3028,7 +3572,7 @@ async function finishCalendarScheduleDrag(event) {
   const moved = drag.moved;
   const startDate = drag.targetStartDate;
   const endDate = drag.targetEndDate;
-  clearCalendarScheduleDragState();
+  clearCalendarScheduleDragState(false);
 
   if (!moved) return;
 
@@ -3038,59 +3582,112 @@ async function finishCalendarScheduleDrag(event) {
   }, 300);
 
   const item = findItem(drag.id);
-  if (!item) return;
+  if (!item) {
+    render();
+    return;
+  }
 
   try {
     await updateCalendarScheduleRange(item, startDate, endDate);
   } catch (error) {
-    setStatus(error.message || "일정 날짜를 변경하지 못했습니다.");
+    setStatus(error.message || "Could not move the event.");
     render();
   }
 }
 
 function cancelCalendarScheduleDrag() {
-  clearCalendarScheduleDragState();
+  clearCalendarScheduleDragState(true);
 }
 
 function updateCalendarScheduleDragTarget(event) {
   const drag = state.calendarScheduleDrag;
   const targetDate = calendarDateFromPoint(event);
-  if (!targetDate) return;
+  if (!targetDate) return false;
+
+  const previousStartDate = drag.targetStartDate;
+  const previousEndDate = drag.targetEndDate;
 
   const delta = daysBetween(drag.grabbedDate, targetDate);
   drag.targetStartDate = addDays(drag.originalStartDate, delta);
   drag.targetEndDate = addDays(drag.originalEndDate, delta);
-}
-
-function markCalendarScheduleDragDates() {
-  clearCalendarScheduleDragDates();
-  if (!state.calendarScheduleDrag) return;
-
-  const range = selectedDateRange(state.calendarScheduleDrag.targetStartDate, state.calendarScheduleDrag.targetEndDate);
-  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
-    const date = day.dataset.date;
-    if (date >= range.startDate && date <= range.endDate) {
-      day.classList.add("calendar-drag-target");
-    }
-  });
+  return drag.targetStartDate !== previousStartDate || drag.targetEndDate !== previousEndDate;
 }
 
 function clearCalendarScheduleDragDates() {
   document.querySelectorAll(".day-cell.calendar-drag-target").forEach((day) => day.classList.remove("calendar-drag-target"));
 }
 
-function clearCalendarScheduleDragState() {
+function renderCalendarScheduleDragPreview() {
+  const drag = state.calendarScheduleDrag;
+  if (!drag?.moved) return;
+
+  clearCalendarScheduleDragPreview(false);
+
+  const item = findItem(drag.id);
+  if (!item) return;
+
+  document.querySelectorAll(".schedule-chip[data-id]").forEach((chip) => {
+    if (chip.dataset.id === drag.id) chip.classList.add("drag-source-hidden");
+  });
+
+  const range = selectedDateRange(drag.targetStartDate, drag.targetEndDate);
+  const { previewItem, row, rowCount } = calendarSchedulePreviewPlacement(item, range.startDate, range.endDate);
+  applyCalendarScheduleRowCount(rowCount);
+  const title = String(item.title || "").trim() || "Untitled";
+
+  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
+    const date = day.dataset.date;
+    if (date < range.startDate || date > range.endDate) return;
+
+    const schedules = day.querySelector(".day-schedules");
+    if (!schedules) return;
+
+    const rangeClass = calendarScheduleRangeClass(previewItem, date);
+    const rangeTokens = rangeClass.split(/\s+/);
+    const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
+    const preview = document.createElement("span");
+    preview.className = [
+      "schedule-chip",
+      "schedule-drag-preview",
+      rangeClass,
+      showTitle ? "has-title" : "continuation",
+      "selected",
+      "dragging"
+    ].join(" ");
+    preview.dataset.id = item.id;
+    preview.dataset.date = date;
+    preview.style.setProperty("--schedule-row", String(row));
+    preview.title = title;
+    preview.textContent = showTitle ? title : "\u00a0";
+    schedules.append(preview);
+  });
+}
+
+function clearCalendarScheduleDragPreview(showSource = true) {
+  document.querySelectorAll(".schedule-drag-preview").forEach((chip) => chip.remove());
+  if (!showSource) return;
+  document.querySelectorAll(".schedule-chip.drag-source-hidden").forEach((chip) => {
+    chip.classList.remove("drag-source-hidden");
+  });
+  resetCalendarScheduleRowCount();
+}
+
+function clearCalendarScheduleDragState(restorePreview = true) {
   if (!state.calendarScheduleDrag) return;
+  const moved = state.calendarScheduleDrag.moved;
   state.calendarScheduleDrag.element.classList.remove("dragging");
   clearCalendarScheduleDragDates();
   state.calendarScheduleDrag = null;
+  if (restorePreview || !moved) clearCalendarScheduleDragPreview(true);
 }
 
 function startCalendarMonthSwipe(event) {
   if (state.tab !== "calendar") return;
   const grid = event.target.closest(".schedule-calendar");
+  const day = event.target.closest(".schedule-calendar [data-date]");
   if (
     !grid ||
+    state.calendarSelectedDate ||
     event.target.closest(".schedule-chip, [data-calendar-resize-edge]") ||
     state.calendarScheduleDrag ||
     state.calendarScheduleResize
@@ -3202,6 +3799,7 @@ function commitCalendarMonthSwipeVisual(grid, dx) {
 async function changeCalendarMonth(delta) {
   if (!delta || state.loading) return;
   state.visibleMonth = addMonths(state.visibleMonth, delta);
+  state.calendarSelectedDate = null;
   state.selectedCalendarSchedule = null;
   clearSelectedTimelineRange();
   await loadItems();
@@ -3311,16 +3909,20 @@ function calendarZoomGestureDistance(gesture) {
 function updateCalendarScheduleResizeTarget(event) {
   const resize = state.calendarScheduleResize;
   const targetDate = calendarDateFromPoint(event);
-  if (!targetDate) return;
+  if (!targetDate) return false;
+
+  const previousStartDate = resize.targetStartDate;
+  const previousEndDate = resize.targetEndDate;
 
   if (resize.edge === "start") {
     resize.targetStartDate = targetDate <= resize.originalEndDate ? targetDate : resize.originalEndDate;
     resize.targetEndDate = resize.originalEndDate;
-    return;
+    return resize.targetStartDate !== previousStartDate || resize.targetEndDate !== previousEndDate;
   }
 
   resize.targetStartDate = resize.originalStartDate;
   resize.targetEndDate = targetDate >= resize.originalStartDate ? targetDate : resize.originalStartDate;
+  return resize.targetStartDate !== previousStartDate || resize.targetEndDate !== previousEndDate;
 }
 
 function calendarDateFromPoint(event) {
@@ -3329,28 +3931,72 @@ function calendarDateFromPoint(event) {
     ?.dataset.date;
 }
 
-function markCalendarScheduleResizeDates() {
-  clearCalendarScheduleResizeDates();
-  if (!state.calendarScheduleResize) return;
-
-  const range = selectedDateRange(state.calendarScheduleResize.targetStartDate, state.calendarScheduleResize.targetEndDate);
-  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
-    const date = day.dataset.date;
-    if (date >= range.startDate && date <= range.endDate) {
-      day.classList.add("calendar-resize-target");
-    }
-  });
-}
-
 function clearCalendarScheduleResizeDates() {
   document.querySelectorAll(".day-cell.calendar-resize-target").forEach((day) => day.classList.remove("calendar-resize-target"));
 }
 
+function renderCalendarScheduleResizePreview() {
+  const resize = state.calendarScheduleResize;
+  if (!resize?.moved) return;
+
+  clearCalendarScheduleResizePreview(false);
+
+  const item = findItem(resize.id);
+  if (!item) return;
+
+  document.querySelectorAll(".schedule-chip[data-id]").forEach((chip) => {
+    if (chip.dataset.id === resize.id) chip.classList.add("resize-source-hidden");
+  });
+
+  const range = selectedDateRange(resize.targetStartDate, resize.targetEndDate);
+  const { previewItem, row, rowCount } = calendarSchedulePreviewPlacement(item, range.startDate, range.endDate);
+  applyCalendarScheduleRowCount(rowCount);
+  const title = String(item.title || "").trim() || "Untitled";
+
+  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
+    const date = day.dataset.date;
+    if (date < range.startDate || date > range.endDate) return;
+
+    const schedules = day.querySelector(".day-schedules");
+    if (!schedules) return;
+
+    const rangeClass = calendarScheduleRangeClass(previewItem, date);
+    const rangeTokens = rangeClass.split(/\s+/);
+    const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
+    const preview = document.createElement("span");
+    preview.className = [
+      "schedule-chip",
+      "schedule-resize-preview",
+      rangeClass,
+      showTitle ? "has-title" : "continuation",
+      "selected",
+      "resizing"
+    ].join(" ");
+    preview.dataset.id = item.id;
+    preview.dataset.date = date;
+    preview.style.setProperty("--schedule-row", String(row));
+    preview.title = title;
+    preview.textContent = showTitle ? title : "\u00a0";
+    schedules.append(preview);
+  });
+}
+
+function clearCalendarScheduleResizePreview(showSource = true) {
+  document.querySelectorAll(".schedule-resize-preview").forEach((chip) => chip.remove());
+  if (!showSource) return;
+  document.querySelectorAll(".schedule-chip.resize-source-hidden").forEach((chip) => {
+    chip.classList.remove("resize-source-hidden");
+  });
+  resetCalendarScheduleRowCount();
+}
+
 function clearCalendarScheduleResizeState(restoreClass) {
   if (!state.calendarScheduleResize) return;
+  const moved = state.calendarScheduleResize.moved;
   state.calendarScheduleResize.element.classList.remove("resizing");
   clearCalendarScheduleResizeDates();
   state.calendarScheduleResize = null;
+  if (restoreClass || !moved) clearCalendarScheduleResizePreview(true);
 }
 
 async function updateCalendarScheduleRange(item, startDate, endDate) {
@@ -3367,6 +4013,7 @@ async function updateCalendarScheduleRange(item, startDate, endDate) {
 
   state.selectedDate = range.startDate;
   state.selectedCalendarSchedule = { id: item.id };
+  state.calendarSelectedDate = null;
   await api("/api/items", {
     method: "PATCH",
     body
@@ -3375,20 +4022,57 @@ async function updateCalendarScheduleRange(item, startDate, endDate) {
 }
 
 function startCalendarSelection(event) {
-  return;
+  if (state.tab !== "calendar" || state.suppressCalendarClick) return;
+  const day = event.target.closest(".schedule-calendar [data-date]");
+  if (
+    !day ||
+    day.dataset.date !== state.calendarSelectedDate ||
+    event.target.closest(".schedule-chip, [data-calendar-resize-edge], button:not(.day-cell), input, textarea, select") ||
+    state.calendarScheduleDrag ||
+    state.calendarScheduleResize ||
+    state.calendarMonthSwipe
+  ) return;
+
+  state.calendarSelection = {
+    pointerId: event.pointerId,
+    startDate: day.dataset.date,
+    currentDate: day.dataset.date,
+    startX: event.clientX,
+    startY: event.clientY,
+    moved: false,
+    cancelled: false
+  };
+  try {
+    day.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can fail when the pointer is no longer active.
+  }
 }
 
 function moveCalendarSelection(event) {
   if (!state.calendarSelection || state.calendarSelection.pointerId !== event.pointerId) return;
 
-  const distance = Math.abs(event.clientX - state.calendarSelection.startX) + Math.abs(event.clientY - state.calendarSelection.startY);
-  if (distance > 10) state.calendarSelection.moved = true;
+  const dx = event.clientX - state.calendarSelection.startX;
+  const dy = event.clientY - state.calendarSelection.startY;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+
+  if (!state.calendarSelection.moved) {
+    if (absY > 14 && absY > absX) {
+      state.calendarSelection.cancelled = true;
+      cancelCalendarSelection();
+      return;
+    }
+    if (absX <= 12 || absX <= absY) return;
+    state.calendarSelection.moved = true;
+  }
 
   const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-date]");
   if (!target) return;
 
   state.calendarSelection.currentDate = target.dataset.date;
   markSelectedCalendarDates();
+  event.preventDefault();
 }
 
 function finishCalendarSelection(event) {
@@ -3399,7 +4083,7 @@ function finishCalendarSelection(event) {
   state.calendarSelection = null;
   clearSelectedCalendarDates();
 
-  if (!selection.moved) return;
+  if (!selection.moved || selection.cancelled) return;
 
   state.lastCalendarClick = null;
   state.suppressCalendarClick = true;
@@ -3407,6 +4091,8 @@ function finishCalendarSelection(event) {
     state.suppressCalendarClick = false;
   }, 250);
   state.selectedDate = range.startDate;
+  state.calendarSelectedDate = range.startDate;
+  state.selectedCalendarSchedule = null;
   render();
   openItemDialog("일정", null, {
     date: range.startDate,
@@ -3424,7 +4110,7 @@ function markSelectedCalendarDates() {
   if (!state.calendarSelection) return;
 
   const range = selectedDateRange(state.calendarSelection.startDate, state.calendarSelection.currentDate);
-  document.querySelectorAll("[data-date]").forEach((day) => {
+  document.querySelectorAll(".schedule-calendar [data-date]").forEach((day) => {
     const date = day.dataset.date;
     if (date >= range.startDate && date <= range.endDate) {
       day.classList.add("calendar-selecting");
@@ -3487,6 +4173,89 @@ function selectedTimelineItemMatches(id, context) {
   );
 }
 
+function clearTimelineItemOnOutsidePointer(event) {
+  if (els.dialog.open || state.timelineDrag || state.timelineResize) return;
+  if (state.selectedTimelineItem && !event.target?.closest?.(".timeline-item.selected")) {
+    clearSelectedTimelineItem();
+  }
+  if (state.selectedTimeRange && !pointerIsInsideSelectedTimeRange(event)) {
+    clearSelectedTimeRangeOnly();
+  }
+}
+
+function clearTimelineItemOnScroll() {
+  if (els.dialog.open || state.timelineDrag || state.timelineResize) return;
+  clearSelectedTimelineItem();
+  clearSelectedTimeRangeOnly();
+}
+
+function clearCalendarDateOnOutsidePointer(event) {
+  if (
+    state.tab !== "calendar" ||
+    !state.calendarSelectedDate ||
+    els.dialog.open ||
+    els.calendarTimelineDialog.open ||
+    state.calendarSelection ||
+    state.calendarScheduleDrag ||
+    state.calendarScheduleResize
+  ) return;
+  if (event.target?.closest?.(".schedule-calendar [data-date]")) return;
+
+  state.calendarSelectedDate = null;
+  state.selectedCalendarSchedule = null;
+  clearSelectedCalendarDates();
+  render();
+}
+
+function suppressTimeSelectionForPointer(pointerId) {
+  state.suppressTimeSelectionPointerId = pointerId;
+  window.clearTimeout(state.suppressTimeSelectionTimer);
+  state.suppressTimeSelectionTimer = window.setTimeout(() => {
+    clearSuppressedTimeSelectionPointer(pointerId);
+  }, 360);
+}
+
+function clearSuppressedTimeSelectionPointer(pointerId) {
+  if (state.suppressTimeSelectionPointerId !== pointerId) return;
+  state.suppressTimeSelectionPointerId = null;
+  window.clearTimeout(state.suppressTimeSelectionTimer);
+  state.suppressTimeSelectionTimer = null;
+}
+
+function clearSelectedTimelineItem() {
+  if (!state.selectedTimelineItem) return false;
+  state.selectedTimelineItem = null;
+  document.querySelectorAll(".timeline-item.selected").forEach((card) => {
+    card.classList.remove("selected");
+  });
+  return true;
+}
+
+function pointerIsInsideSelectedTimeRange(event) {
+  const slot = event.target?.closest?.("[data-time-slot]");
+  return Boolean(
+    slot &&
+    timeRangeContainsSlot(
+      state.selectedTimeRange,
+      timelineContextFromSlot(slot),
+      state.selectedDate,
+      slot.dataset.timeSlot
+    )
+  );
+}
+
+function clearSelectedTimeRangeOnly() {
+  const selectedSlots = document.querySelectorAll(".slot.selected");
+  if (!state.selectedTimeRange && !selectedSlots.length) return false;
+  state.selectedTimeRange = null;
+  window.clearTimeout(state.timeClickTimer);
+  state.timeClickTimer = null;
+  selectedSlots.forEach((slot) => {
+    slot.classList.remove("selected");
+  });
+  return true;
+}
+
 function canSelectTimelineItem(item) {
   return Boolean(item && (item.type === "일정" || item.type === "할일" || item.type === "루틴"));
 }
@@ -3499,10 +4268,10 @@ async function deleteTimelineItem(id) {
 
   try {
     await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    setStatus("삭제했습니다.");
+    setStatus("Deleted.");
     await loadItems();
   } catch (error) {
-    setStatus(error.message || "삭제하지 못했습니다.");
+    setStatus(error.message || "Could not delete.");
     render();
   }
 }
@@ -3603,7 +4372,7 @@ function timeParts(time) {
   const [hour, minute] = time.split(":").map(Number);
   if (hour === 24 && minute === 0) {
     return {
-      period: "오전",
+      period: "AM",
       hour24: 24,
       hour12: 12,
       minute: "00"
@@ -3611,7 +4380,7 @@ function timeParts(time) {
   }
 
   return {
-    period: hour < 12 ? "오전" : "오후",
+    period: hour < 12 ? "AM" : "PM",
     hour24: hour,
     hour12: hour % 12 || 12,
     minute: String(minute).padStart(2, "0")
@@ -3622,7 +4391,7 @@ function formatKoreanTime(time) {
   if (!isTimeString(time)) return "";
   if (time === FULL_DAY_END_TIME) return FULL_DAY_END_TIME;
   const parts = timeParts(time);
-  return `${parts.period} ${parts.hour12}:${parts.minute}`;
+  return `${parts.hour12}:${parts.minute} ${parts.period}`;
 }
 
 function timeToMinutes(time) {
@@ -3692,20 +4461,20 @@ async function saveEmotion(nextEmotion) {
             note: comment
           }
         });
-        setStatus("코멘트를 저장했습니다.");
+        setStatus("Comment saved.");
         await loadItems();
       } catch (error) {
-        setStatus(error.message || "코멘트를 저장하지 못했습니다.");
+        setStatus(error.message || "Could not save the comment.");
       }
       return;
     }
 
-    setStatus("감정 색을 먼저 골라주세요.");
+    setStatus("Choose an emotion color first.");
     return;
   }
 
   const payload = {
-    title: `${state.selectedDate} 감정 체크`,
+    title: `${state.selectedDate} Emotion Check`,
     type: "감정",
     date: state.selectedDate,
     emotion,
@@ -3720,13 +4489,13 @@ async function saveEmotion(nextEmotion) {
       method: "POST",
       body: payload
     });
-    setStatus("감정 체크를 저장했습니다.");
+    setStatus("Emotion check saved.");
     await loadItems();
     if (els.emotionDialog.open && !nextEmotion) {
       els.emotionDialog.close();
     }
   } catch (error) {
-    setStatus(error.message || "감정 체크를 저장하지 못했습니다.");
+    setStatus(error.message || "Could not save the emotion check.");
   } finally {
     state.emotionSaving = false;
   }
@@ -3746,19 +4515,19 @@ function openEmotionDialog(date) {
   const emotion = emotionRecord(date);
   if (!emotion) return;
 
-  els.emotionDialogTitle.textContent = "감정 코멘트";
+  els.emotionDialogTitle.textContent = "Emotion Comment";
   const normalizedEmotion = normalizeEmotionValue(emotion.emotion || emotion.mood);
   const palette = emotionPalette(normalizedEmotion);
   const swatchStyle = palette
     ? ` style="--emotion-swatch:${palette.color}; --emotion-swatch-border:${palette.border};"`
     : "";
-  const note = emotion.note ? escapeHtml(emotion.note) : "코멘트 없음";
+  const note = emotion.note ? escapeHtml(emotion.note) : "No comment";
 
   els.emotionDialogContent.innerHTML = `
     <div class="emotion-dialog-date">${humanDate(date)}</div>
     <div class="emotion-dialog-row">
       <span class="emotion-dialog-swatch"${swatchStyle}></span>
-      <span>${normalizedEmotion ? escapeHtml(normalizedEmotion) : "색상 없음"}</span>
+      <span>${normalizedEmotion ? escapeHtml(displayEmotion(normalizedEmotion)) : "No color"}</span>
     </div>
     <p class="emotion-dialog-comment">${note}</p>
   `;
@@ -3776,10 +4545,10 @@ async function removeEmotion(date) {
   try {
     if (els.emotionDialog.open) els.emotionDialog.close();
     await api(`/api/items?id=${encodeURIComponent(existing.id)}`, { method: "DELETE" });
-    setStatus("감정 기록을 제거했습니다.");
+    setStatus("Emotion record removed.");
     await loadItems();
   } catch (error) {
-    setStatus(error.message || "감정 기록을 제거하지 못했습니다.");
+    setStatus(error.message || "Could not remove the emotion record.");
   }
 }
 
@@ -3793,15 +4562,28 @@ function setTab(tab) {
   if (changed) {
     state.selectedDate = today;
     state.visibleMonth = monthStart(today);
+    state.calendarSelectedDate = null;
     state.calendarZoomGesture = null;
     resetCalendarZoom(false);
   }
   if (tab !== "emotion") state.selectedEmotionDate = null;
   if (tab !== "emotion") state.selectedChallengeLayer = null;
-  if (tab !== "calendar") state.selectedCalendarSchedule = null;
+  if (tab !== "calendar") {
+    state.calendarSelectedDate = null;
+    state.selectedCalendarSchedule = null;
+  }
   if (tab !== "calendar" && els.calendarTimelineDialog.open) els.calendarTimelineDialog.close();
   clearSelectedTimelineRange();
   render();
+  if (changed) resetAppScroll();
+}
+
+function resetAppScroll() {
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.scrollingElement?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector(".shell")?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+  });
 }
 
 function adjustCalendarZoom(delta) {
@@ -3921,7 +4703,9 @@ function routineStreak(routineId) {
 }
 
 function routineDaysLabel(routine) {
-  return routine.repeatDays && routine.repeatDays.length ? routine.repeatDays.join(", ") : "매일";
+  return routine.repeatDays && routine.repeatDays.length
+    ? routine.repeatDays.map((day) => ROUTINE_DAY_LABELS[day] || day).join(", ")
+    : "Every day";
 }
 
 function routineTimeLabel(routine) {
@@ -3930,7 +4714,7 @@ function routineTimeLabel(routine) {
 }
 
 function routineMeta(routine) {
-  const parts = [routineTimeLabel(routine), routineDaysLabel(routine), `${routineStreak(routine.id)}일 연속`]
+  const parts = [routineTimeLabel(routine), routineDaysLabel(routine), `${routineStreak(routine.id)} day streak`]
     .filter(Boolean);
   return parts.map(escapeHtml).join(" · ");
 }
@@ -3983,7 +4767,7 @@ function timeSlots() {
 function formatTimelineHour(time) {
   if (!isTimeString(time)) return "";
   const parts = timeParts(time);
-  return `${parts.period} ${parts.hour12}시`;
+  return `${parts.hour12} ${parts.period}`;
 }
 
 function calendarDays(monthDate) {
@@ -4048,12 +4832,20 @@ function toDateString(date) {
 
 function humanDate(date) {
   const target = new Date(`${date}T00:00:00`);
-  const label = target.toLocaleDateString("ko-KR", {
+  const label = target.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     weekday: "short"
   });
   return label;
+}
+
+function displayType(type) {
+  return TYPE_LABELS[type] || type || "";
+}
+
+function displayEmotion(emotion) {
+  return EMOTION_LABELS[emotion] || emotion || "";
 }
 
 function byStartTime(a, b) {
@@ -4065,7 +4857,7 @@ function byDoneThenTitle(a, b) {
 }
 
 function byTitle(a, b) {
-  return String(a.title || "").localeCompare(String(b.title || ""), "ko");
+  return String(a.title || "").localeCompare(String(b.title || ""), "en");
 }
 
 function setStatus(message) {
@@ -4078,12 +4870,13 @@ async function api(path, options = {}) {
     headers: {
       "Content-Type": "application/json"
     },
+    keepalive: Boolean(options.keepalive),
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const error = new Error(payload.message || payload.error || "요청에 실패했습니다.");
+    const error = new Error(payload.message || payload.error || "Request failed.");
     error.payload = payload;
     throw error;
   }

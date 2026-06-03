@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -15,12 +15,15 @@
   <body>
     <main class="shell">
       <section id="authView" class="auth-view" hidden>
+        <div class="auth-bg-layer" aria-hidden="true"></div>
+        <div class="auth-paint-layer" aria-hidden="true"></div>
+        <div class="auth-unlock-logo" aria-hidden="true"></div>
         <form id="loginForm" class="panel">
           <div class="auth-logo" aria-label="Sephia Chord"></div>
           <div class="auth-brand">
             <span class="brand-mark brand-mark-large" aria-hidden="true"></span>
             <div>
-              <p class="eyebrow">개인 플래너</p>
+              <p class="eyebrow">Private Planner</p>
               <h1>Sephia Chord</h1>
             </div>
           </div>
@@ -34,7 +37,7 @@
               minlength="4"
               maxlength="4"
               autocomplete="current-password"
-              aria-label="비밀번호"
+              aria-label="Password"
               required
             >
             <div class="pin-dots" aria-hidden="true">
@@ -43,7 +46,7 @@
               <span></span>
               <span></span>
             </div>
-            <div class="pin-keypad" aria-label="숫자 키패드">
+            <div class="pin-keypad" aria-label="Number keypad">
               <button type="button" data-pin-key="1">1</button>
               <button type="button" data-pin-key="2">2</button>
               <button type="button" data-pin-key="3">3</button>
@@ -55,7 +58,7 @@
               <button type="button" data-pin-key="9">9</button>
               <span></span>
               <button type="button" data-pin-key="0">0</button>
-              <button type="button" data-pin-delete aria-label="삭제">⌫</button>
+              <button type="button" data-pin-delete aria-label="Delete">⌫</button>
             </div>
           </div>
           <p id="authMessage" class="message"></p>
@@ -67,12 +70,12 @@
           <div class="brand-lockup">
             <span class="brand-mark" aria-hidden="true"></span>
             <div>
-              <h1 id="selectedDateLabel">오늘</h1>
+              <h1 id="selectedDateLabel">Today</h1>
             </div>
           </div>
           <div class="top-actions">
-            <button id="refreshButton" type="button" class="icon-button" title="새로고침">↻</button>
-            <button id="logoutButton" type="button" class="icon-button" title="로그아웃">⌁</button>
+            <button id="refreshButton" type="button" class="icon-button" title="Refresh">↻</button>
+            <button id="logoutButton" type="button" class="icon-button" title="Log out">⏻</button>
           </div>
         </header>
 
@@ -83,48 +86,65 @@
         <section id="emotionTab" class="tab-view" hidden></section>
         <section id="routinesTab" class="tab-view" hidden></section>
 
-        <nav class="bottom-nav" aria-label="주 메뉴">
-          <button type="button" data-tab="today" class="active">오늘</button>
-          <button type="button" data-tab="calendar">캘린더</button>
-          <button type="button" data-tab="emotion">챌린지</button>
-          <button type="button" data-tab="routines">루틴</button>
+        <nav class="bottom-nav" aria-label="Main navigation">
+          <button type="button" data-tab="today" class="active">Today</button>
+          <button type="button" data-tab="calendar">Calendar</button>
+          <button type="button" data-tab="emotion">Challenge</button>
+          <button type="button" data-tab="routines">Routine</button>
         </nav>
       </section>
     </main>
 
     <dialog id="itemDialog">
+      <button
+        type="submit"
+        id="itemDialogBackdrop"
+        class="item-dialog-backdrop"
+        aria-label="Cancel"
+        data-dialog-action="cancel"
+        form="itemForm"
+        formmethod="dialog"
+        formnovalidate
+      ></button>
       <form id="itemForm" method="dialog" class="dialog-body item-dialog-body">
         <div class="dialog-header item-dialog-header">
-          <button type="button" id="closeDialogButton" class="dialog-text-button">취소</button>
-          <h2 id="dialogTitle">추가</h2>
-          <button type="submit" class="dialog-text-button primary-text">저장</button>
+          <button
+            type="submit"
+            id="closeDialogButton"
+            class="dialog-text-button"
+            data-dialog-action="cancel"
+            formmethod="dialog"
+            formnovalidate
+          >Cancel</button>
+          <h2 id="dialogTitle">Add</h2>
+          <button type="submit" class="dialog-text-button primary-text">Save</button>
         </div>
 
         <input id="editingId" type="hidden">
 
         <label class="native-type-field">
-          유형
+          Type
           <select id="typeInput" required>
-            <option value="일정">일정</option>
-            <option value="할일">할일</option>
-            <option value="루틴">루틴</option>
+            <option value="일정">Event</option>
+            <option value="할일">Task</option>
+            <option value="루틴">Routine</option>
           </select>
         </label>
 
         <label class="title-field">
-          <input id="titleInput" type="text" maxlength="80" placeholder="제목 추가" required>
+          <input id="titleInput" type="text" maxlength="80" placeholder="Add title" required>
         </label>
 
-        <div class="type-segment" aria-label="유형">
-          <button type="button" data-type-choice="일정">일정</button>
-          <button type="button" data-type-choice="할일">할 일</button>
-          <button type="button" data-type-choice="루틴">루틴</button>
+        <div class="type-segment" aria-label="Type">
+          <button type="button" data-type-choice="일정">Event</button>
+          <button type="button" data-type-choice="할일">Task</button>
+          <button type="button" data-type-choice="루틴">Routine</button>
         </div>
 
         <div class="editor-card">
           <label id="allDayField" class="editor-row all-day-row">
             <span class="editor-icon" aria-hidden="true">◷</span>
-            <span class="editor-label">종일</span>
+            <span class="editor-label">All day</span>
             <span class="switch-control">
               <input id="allDayInput" type="checkbox">
               <span></span>
@@ -136,11 +156,11 @@
             <div class="editor-date-time-row start-date-time-row">
               <span class="editor-icon" aria-hidden="true">◷</span>
               <label class="date-editor-field">
-                <span id="startDateLabel">시작일</span>
+                <span id="startDateLabel">Start date</span>
                 <input id="dateInput" type="text" inputmode="none" readonly data-picker="date">
               </label>
               <label class="time-editor-field">
-                <span id="startTimeLabel" class="time-editor-label">시간선택</span>
+                <span id="startTimeLabel" class="time-editor-label">Time</span>
                 <input id="startTimeInput" type="text" inputmode="none" readonly data-picker="time">
                 <span id="startTimeDisplay" class="time-editor-value" aria-hidden="true"></span>
               </label>
@@ -148,11 +168,11 @@
             <div id="endDateField" class="editor-date-time-row end-date-time-row">
               <span class="editor-icon" aria-hidden="true"></span>
               <label class="date-editor-field">
-                <span id="endDateLabel">마감일</span>
+                <span id="endDateLabel">End date</span>
                 <input id="endDateInput" type="text" inputmode="none" readonly data-picker="date">
               </label>
               <label class="time-editor-field">
-                <span id="endTimeLabel" class="time-editor-label">시간선택</span>
+                <span id="endTimeLabel" class="time-editor-label">Time</span>
                 <input id="endTimeInput" type="text" inputmode="none" readonly data-picker="time">
                 <span id="endTimeDisplay" class="time-editor-value" aria-hidden="true"></span>
               </label>
@@ -164,25 +184,25 @@
         </div>
 
         <div id="routineFields" class="editor-card">
-          <p class="field-label">반복요일</p>
+          <p class="field-label">Repeat days</p>
           <div class="chips">
-            <label><input type="checkbox" name="repeatDay" value="월">월</label>
-            <label><input type="checkbox" name="repeatDay" value="화">화</label>
-            <label><input type="checkbox" name="repeatDay" value="수">수</label>
-            <label><input type="checkbox" name="repeatDay" value="목">목</label>
-            <label><input type="checkbox" name="repeatDay" value="금">금</label>
-            <label><input type="checkbox" name="repeatDay" value="토">토</label>
-            <label><input type="checkbox" name="repeatDay" value="일">일</label>
+            <label><input type="checkbox" name="repeatDay" value="월">Mon</label>
+            <label><input type="checkbox" name="repeatDay" value="화">Tue</label>
+            <label><input type="checkbox" name="repeatDay" value="수">Wed</label>
+            <label><input type="checkbox" name="repeatDay" value="목">Thu</label>
+            <label><input type="checkbox" name="repeatDay" value="금">Fri</label>
+            <label><input type="checkbox" name="repeatDay" value="토">Sat</label>
+            <label><input type="checkbox" name="repeatDay" value="일">Sun</label>
           </div>
         </div>
 
         <label class="note-field">
-          메모
+          Note
           <textarea id="noteInput" rows="3" maxlength="2000"></textarea>
         </label>
 
         <div class="dialog-actions">
-          <button type="button" id="deleteButton" class="danger" hidden>삭제</button>
+          <button type="button" id="deleteButton" class="danger" hidden>Delete</button>
         </div>
       </form>
     </dialog>
@@ -190,8 +210,8 @@
     <dialog id="emotionDialog">
       <div class="dialog-body">
         <div class="dialog-header">
-          <h2 id="emotionDialogTitle">챌린지</h2>
-          <button type="button" id="closeEmotionDialogButton" class="icon-button dialog-close-button" title="닫기">×</button>
+          <h2 id="emotionDialogTitle">Challenge</h2>
+          <button type="button" id="closeEmotionDialogButton" class="icon-button dialog-close-button" title="Close">×</button>
         </div>
         <div id="emotionDialogContent" class="emotion-dialog-content"></div>
       </div>
@@ -200,10 +220,21 @@
     <dialog id="calendarTimelineDialog" class="calendar-timeline-dialog">
       <div class="dialog-body">
         <div class="dialog-header">
-          <h2 id="calendarTimelineTitle">시간표</h2>
-          <button type="button" id="closeCalendarTimelineDialogButton" class="icon-button dialog-close-button" title="닫기">×</button>
+          <h2 id="calendarTimelineTitle">Timeline</h2>
+          <button type="button" id="closeCalendarTimelineDialogButton" class="icon-button dialog-close-button" title="Close">×</button>
         </div>
         <div id="calendarTimelineContent" class="calendar-timeline-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="logoutMoodDialog" class="logout-mood-dialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <h2>Today's Mood</h2>
+          <button type="button" id="closeLogoutMoodDialogButton" class="icon-button dialog-close-button" title="Close">×</button>
+        </div>
+        <p class="logout-mood-copy">Choose a color for your next login.</p>
+        <div id="logoutMoodContent" class="logout-mood-content"></div>
       </div>
     </dialog>
 
