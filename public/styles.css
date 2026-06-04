@@ -247,18 +247,22 @@ body.fixed-tab #statusMessage {
   pointer-events: none;
 }
 
-.auth-unlock-logo.is-glitching {
-  animation: auth-logo-glitch-base 180ms steps(2, end);
+.auth-view.is-glitching .auth-unlock-logo {
+  animation: auth-logo-glitch-base 140ms steps(2, end);
 }
 
-.auth-unlock-logo.is-glitching::before {
-  animation: auth-logo-glitch-red 180ms steps(2, end);
-  filter: drop-shadow(-3px 0 rgb(239 94 75 / 74%));
+.auth-view.is-glitching .auth-catchphrase {
+  animation: auth-phrase-glitch 140ms steps(2, end);
 }
 
-.auth-unlock-logo.is-glitching::after {
-  animation: auth-logo-glitch-blue 180ms steps(2, end);
-  filter: drop-shadow(3px 0 rgb(96 140 255 / 64%));
+.auth-view.is-glitching .auth-unlock-logo::before {
+  animation: auth-logo-glitch-red 140ms steps(2, end);
+  filter: drop-shadow(-2px 0 rgb(239 94 75 / 42%));
+}
+
+.auth-view.is-glitching .auth-unlock-logo::after {
+  animation: auth-logo-glitch-blue 140ms steps(2, end);
+  filter: drop-shadow(2px 0 rgb(96 140 255 / 38%));
 }
 
 .auth-view.is-unlocking .auth-unlock-logo {
@@ -369,11 +373,36 @@ body.fixed-tab #statusMessage {
   }
 
   28% {
-    transform: translate(1px, -1px) scale(1.006);
+    transform: translate(1px, 0) scale(1.003);
   }
 
   58% {
-    transform: translate(-1px, 1px) scale(0.998);
+    transform: translate(-1px, 0) scale(0.999);
+  }
+}
+
+@keyframes auth-phrase-glitch {
+  0%,
+  100% {
+    opacity: 1;
+    text-shadow: 0 8px 18px rgb(0 0 0 / 28%);
+    transform: translate(0);
+  }
+
+  28% {
+    opacity: .9;
+    text-shadow:
+      -1px 0 rgb(239 94 75 / 34%),
+      0 8px 18px rgb(0 0 0 / 28%);
+    transform: translate(1px, 0);
+  }
+
+  58% {
+    opacity: .94;
+    text-shadow:
+      1px 0 rgb(96 140 255 / 28%),
+      0 8px 18px rgb(0 0 0 / 28%);
+    transform: translate(-1px, 0);
   }
 }
 
@@ -387,20 +416,20 @@ body.fixed-tab #statusMessage {
 
   24% {
     clip-path: inset(8% 0 65% 0);
-    opacity: 0.75;
-    transform: translate(-4px, 1px);
+    opacity: 0.38;
+    transform: translate(-2px, 0);
   }
 
   52% {
     clip-path: inset(46% 0 30% 0);
-    opacity: 0.55;
-    transform: translate(3px, -1px);
+    opacity: 0.3;
+    transform: translate(1px, 0);
   }
 
   76% {
     clip-path: inset(72% 0 8% 0);
-    opacity: 0.65;
-    transform: translate(-2px, 0);
+    opacity: 0.34;
+    transform: translate(-1px, 0);
   }
 }
 
@@ -414,20 +443,20 @@ body.fixed-tab #statusMessage {
 
   18% {
     clip-path: inset(64% 0 10% 0);
-    opacity: 0.56;
-    transform: translate(4px, -1px);
+    opacity: 0.32;
+    transform: translate(2px, 0);
   }
 
   48% {
     clip-path: inset(18% 0 58% 0);
-    opacity: 0.62;
-    transform: translate(-3px, 1px);
+    opacity: 0.34;
+    transform: translate(-1px, 0);
   }
 
   70% {
     clip-path: inset(38% 0 40% 0);
-    opacity: 0.5;
-    transform: translate(2px, 0);
+    opacity: 0.28;
+    transform: translate(1px, 0);
   }
 }
 
@@ -443,7 +472,7 @@ body.fixed-tab #statusMessage {
 
 .pin-login {
   display: grid;
-  gap: 24px;
+  gap: 18px;
 }
 
 .pin-input {
@@ -474,6 +503,19 @@ body.fixed-tab #statusMessage {
   border-color: #fff6ec;
   background: #fff6ec;
   transform: scale(1.05);
+}
+
+.auth-catchphrase {
+  align-self: center;
+  min-height: 34px;
+  margin: 0;
+  color: rgb(255 246 235 / 86%);
+  font-family: "Bradley Hand", "Brush Script MT", "Segoe Print", "Comic Sans MS", cursive;
+  font-size: clamp(24px, 7vw, 34px);
+  font-weight: 500;
+  line-height: 1.05;
+  text-align: center;
+  text-shadow: 0 8px 18px rgb(0 0 0 / 28%);
 }
 
 .pin-keypad {
@@ -606,7 +648,7 @@ h3 {
 .top-actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 6px;
 }
 
 .icon-button {
@@ -776,12 +818,12 @@ body.fixed-tab #emotionTab .section {
 .timeline-layer .timeline-item {
   position: absolute;
   grid-template-columns: 42px minmax(0, 1fr) 30px;
-  top: calc(var(--slot-start) * var(--slot-height) + 6px);
+  top: calc(var(--slot-start) * var(--slot-height));
   left: calc(var(--slot-column, 0) * 100% / var(--slot-columns, 1));
   z-index: 1;
   width: calc(100% / var(--slot-columns, 1) - 4px);
-  height: max(42px, calc(var(--slot-span) * var(--slot-height) - 12px));
-  min-height: 42px;
+  height: max(28px, calc(var(--slot-span) * var(--slot-height)));
+  min-height: 28px;
   gap: 8px;
   overflow: hidden;
   padding: 6px;
@@ -794,6 +836,12 @@ body.fixed-tab #emotionTab .section {
   border-color: rgb(244 151 143 / 62%);
   background: linear-gradient(180deg, rgb(97 48 43 / 92%), rgb(58 31 28 / 94%));
   color: #ffe2dd;
+}
+
+.timeline-layer .timeline-item.fixed-event-item {
+  grid-template-columns: 42px minmax(0, 1fr) 38px 30px;
+  border-color: rgb(245 178 149 / 66%);
+  background: linear-gradient(180deg, rgb(93 54 41 / 92%), rgb(55 35 29 / 94%));
 }
 
 .timeline-layer .timeline-item.task-item {
@@ -862,6 +910,7 @@ body.fixed-tab #emotionTab .section {
 
 .timeline-layer .timeline-item .checkbox,
 .timeline-layer .timeline-item .tag,
+.timeline-layer .timeline-item .fixed-skip-button,
 .timeline-layer .timeline-item .edit-button {
   align-self: center;
   justify-self: center;
@@ -884,6 +933,23 @@ body.fixed-tab #emotionTab .section {
   height: 26px;
   min-width: 26px;
   min-height: 26px;
+}
+
+.timeline-layer .timeline-item .fixed-skip-button {
+  width: 38px;
+  min-width: 38px;
+  min-height: 26px;
+  border-color: rgb(245 178 149 / 44%);
+  background: rgb(60 34 27 / 66%);
+  color: #ffd7c9;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 0;
+}
+
+.timeline-layer .timeline-item .fixed-skip-button:active {
+  transform: none;
 }
 
 .timeline-layer .timeline-item .edit-button {
@@ -1329,9 +1395,15 @@ body.fixed-tab #emotionTab .challenge-panel.challenge-cleared {
   --calendar-day-height: calc(29px + var(--schedule-row-count, 2) * var(--schedule-row-height));
   border-radius: var(--radius);
   transform: translateX(var(--calendar-swipe-x, 0));
-  transition: transform 180ms cubic-bezier(.2, .8, .2, 1), opacity 180ms ease;
+  transition: transform 210ms cubic-bezier(.16, 1, .3, 1), opacity 170ms ease;
   touch-action: none;
   will-change: transform;
+}
+
+.calendar-stage {
+  position: relative;
+  min-height: 0;
+  height: 100%;
 }
 
 body.fixed-tab #calendarTab .schedule-calendar {
@@ -1344,8 +1416,8 @@ body.fixed-tab #calendarTab .schedule-calendar {
 }
 
 .schedule-calendar.month-swipe-commit {
-  opacity: .82;
-  transition: transform 150ms ease, opacity 150ms ease;
+  opacity: .86;
+  transition: transform 145ms cubic-bezier(.22, 1, .36, 1), opacity 145ms ease;
 }
 
 .schedule-calendar.zoom-default-hit {
@@ -1425,10 +1497,13 @@ body.fixed-tab #calendarTab .schedule-calendar {
 .day-cell.selected {
   border-color: #be7a3a;
   background: #21160f;
-  color: var(--accent-strong);
 }
 
 .schedule-calendar .day-cell:has(.schedule-chip:active) {
+  transform: none;
+}
+
+.schedule-calendar .day-cell:active {
   transform: none;
 }
 
@@ -1446,10 +1521,33 @@ body.fixed-tab #calendarTab .schedule-calendar {
 }
 
 .day-number {
+  display: inline-grid;
+  width: fit-content;
+  min-width: 20px;
+  min-height: 20px;
+  place-items: center;
   justify-self: start;
   color: inherit;
   font-size: 11px;
-  line-height: 1;
+  line-height: 20px;
+  padding: 0 5px;
+}
+
+.day-cell.selected .day-number {
+  color: var(--accent-strong);
+}
+
+.schedule-calendar .day-cell.today .day-number {
+  border: 1px solid rgb(241 216 189 / 62%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgb(139 77 32 / 88%), rgb(64 38 23 / 92%));
+  color: #fff6ec;
+  box-shadow: 0 0 0 1px rgb(15 12 9 / 78%), 0 5px 12px rgb(0 0 0 / 22%);
+}
+
+.schedule-calendar .day-cell.today.selected .day-number {
+  border-color: #fff1df;
+  background: linear-gradient(180deg, #d39965, #81481f);
 }
 
 .day-head {
@@ -1463,10 +1561,11 @@ body.fixed-tab #calendarTab .schedule-calendar {
 
 .holiday-label {
   position: absolute;
-  top: 5px;
+  top: 16px;
   right: 5px;
   z-index: 2;
-  display: block;
+  display: inline-flex;
+  align-items: center;
   overflow: hidden;
   height: 12px;
   max-width: calc(100% - 22px);
@@ -1478,6 +1577,7 @@ body.fixed-tab #calendarTab .schedule-calendar {
   line-height: 1;
   padding: 1px 3px;
   text-overflow: ellipsis;
+  transform: translateY(-50%);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1509,6 +1609,7 @@ body.fixed-tab #calendarTab .schedule-calendar {
 
 .schedule-chip,
 .schedule-more {
+  --schedule-chip-radius: 4px;
   display: block;
   position: absolute;
   top: calc(var(--schedule-row, 0) * var(--schedule-row-height));
@@ -1518,7 +1619,7 @@ body.fixed-tab #calendarTab .schedule-calendar {
   overflow: hidden;
   height: var(--schedule-chip-height, 13px);
   border: 1px solid #8b5a31;
-  border-radius: 999px;
+  border-radius: var(--schedule-chip-radius);
   background: #3b2415;
   color: #f1d8bd;
   font-size: var(--schedule-chip-font-size, 9px);
@@ -1531,6 +1632,17 @@ body.fixed-tab #calendarTab .schedule-calendar {
 
 .schedule-chip.has-title {
   z-index: 2;
+}
+
+.schedule-calendar .day-cell.selected .schedule-chip,
+.schedule-calendar .day-cell.selected .schedule-more {
+  color: #f1d8bd;
+}
+
+.schedule-chip.fixed-schedule-chip {
+  border-color: rgb(244 151 143 / 62%);
+  background: linear-gradient(180deg, rgb(97 48 43 / 92%), rgb(58 31 28 / 94%));
+  color: #ffe2dd;
 }
 
 .schedule-chip.selected {
@@ -1559,6 +1671,11 @@ body.fixed-tab #calendarTab .schedule-calendar {
   pointer-events: none;
 }
 
+.schedule-chip.schedule-drag-preview {
+  transform: translate3d(var(--calendar-drag-x, 0px), var(--calendar-drag-y, 0px), 0);
+  will-change: transform;
+}
+
 .schedule-chip.dragging {
   cursor: grabbing;
   opacity: 0.9;
@@ -1572,11 +1689,11 @@ body.fixed-tab #calendarTab .schedule-calendar {
 
 .calendar-resize-handle {
   position: absolute;
-  top: -2px;
-  bottom: -2px;
+  top: -6px;
+  bottom: -6px;
   z-index: 5;
   display: block;
-  width: 10px;
+  width: 22px;
   border-radius: 999px;
   pointer-events: auto;
   touch-action: none;
@@ -1594,19 +1711,99 @@ body.fixed-tab #calendarTab .schedule-calendar {
 }
 
 .calendar-resize-handle.resize-left {
-  left: 0;
+  left: -4px;
 }
 
 .calendar-resize-handle.resize-left::before {
-  left: 4px;
+  left: 10px;
 }
 
 .calendar-resize-handle.resize-right {
-  right: 0;
+  right: -4px;
 }
 
 .calendar-resize-handle.resize-right::before {
-  right: 4px;
+  right: 10px;
+}
+
+.calendar-schedule-control {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 14;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: stretch;
+  overflow: hidden;
+  min-height: 52px;
+  border: 1px solid rgb(241 216 189 / 34%);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(44 29 19 / 84%), rgb(21 15 11 / 88%)),
+    radial-gradient(circle at 12% 0%, rgb(196 123 60 / 14%), transparent 46%);
+  box-shadow: 0 16px 30px rgb(0 0 0 / 30%), inset 0 0 0 1px rgb(196 123 60 / 12%);
+  touch-action: none;
+}
+
+.calendar-schedule-control button {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  touch-action: none;
+}
+
+.calendar-schedule-control button:active {
+  transform: none;
+}
+
+.calendar-control-grip {
+  display: grid;
+  place-items: center;
+  color: rgb(241 216 189 / 76%);
+  font-size: 24px;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.calendar-control-grip.resize-left {
+  border-right: 1px solid rgb(241 216 189 / 12%);
+}
+
+.calendar-control-grip.resize-right {
+  border-left: 1px solid rgb(241 216 189 / 12%);
+}
+
+.calendar-schedule-control .calendar-control-main {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  gap: 3px;
+  padding: 0 12px 0 28px;
+  text-align: left;
+}
+
+.calendar-control-title,
+.calendar-control-meta {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-control-title {
+  color: #fff0df;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-control-meta {
+  color: #d5b99b;
+  font-size: 10px;
 }
 
 .schedule-chip.single {
@@ -1614,37 +1811,37 @@ body.fixed-tab #calendarTab .schedule-calendar {
   margin-left: 0;
   margin-right: 0;
   border-color: #8b5a31;
-  border-radius: 999px;
+  border-radius: var(--schedule-chip-radius);
 }
 
 .schedule-chip.connect-left {
-  margin-left: -12px;
-  border-left-color: transparent;
-  border-radius: 0 999px 999px 0;
+  margin-left: calc(-16px - var(--calendar-gap, 5px));
+  border-left-width: 0;
+  border-radius: 0 var(--schedule-chip-radius) var(--schedule-chip-radius) 0;
   padding-left: 7px;
 }
 
 .schedule-chip.connect-right {
-  margin-right: -12px;
-  border-right-color: transparent;
-  border-radius: 999px 0 0 999px;
+  margin-right: calc(-16px - var(--calendar-gap, 5px));
+  border-right-width: 0;
+  border-radius: var(--schedule-chip-radius) 0 0 var(--schedule-chip-radius);
   padding-right: 7px;
 }
 
 .schedule-chip.connect-left.connect-right {
-  border-right-color: transparent;
-  border-left-color: transparent;
+  border-right-width: 0;
+  border-left-width: 0;
   border-radius: 0;
 }
 
 .schedule-chip.segment-start {
-  border-top-left-radius: 999px;
-  border-bottom-left-radius: 999px;
+  border-top-left-radius: var(--schedule-chip-radius);
+  border-bottom-left-radius: var(--schedule-chip-radius);
 }
 
 .schedule-chip.segment-end {
-  border-top-right-radius: 999px;
-  border-bottom-right-radius: 999px;
+  border-top-right-radius: var(--schedule-chip-radius);
+  border-bottom-right-radius: var(--schedule-chip-radius);
 }
 
 .schedule-more {
@@ -1835,19 +2032,53 @@ dialog::backdrop {
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
-.logout-mood-dialog h2 {
+.logout-mood-dialog h2,
+.auth-phrase-dialog h2 {
   font-size: 18px;
 }
 
-.logout-mood-copy {
+.logout-mood-copy,
+.auth-phrase-copy {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
 }
 
-.logout-mood-content {
+.logout-mood-content,
+.auth-phrase-content {
   display: grid;
   gap: 8px;
+}
+
+.auth-phrase-dialog .dialog-body {
+  gap: 12px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.auth-phrase-list {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-phrase-choice {
+  display: grid;
+  min-height: 58px;
+  place-items: center;
+  border-color: #4b392d;
+  background: rgb(19 14 10 / 84%);
+  color: #f5e5d1;
+  font-family: "Bradley Hand", "Brush Script MT", "Segoe Print", "Comic Sans MS", cursive;
+  font-size: 24px;
+  line-height: 1.1;
+  padding: 0 14px;
+  text-align: center;
+}
+
+.auth-phrase-choice.selected {
+  border-color: var(--accent-strong);
+  background: linear-gradient(180deg, #4a2b17, #2a1a11);
+  color: #fff5e9;
+  box-shadow: inset 0 0 0 1px rgb(241 216 189 / 22%);
 }
 
 .logout-mood-grid {
@@ -1997,7 +2228,8 @@ dialog::backdrop {
 }
 
 .type-segment {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2007,7 +2239,7 @@ dialog::backdrop {
   background: #151315;
   color: var(--muted);
   font-size: 14px;
-  padding: 0 16px;
+  padding: 0 10px;
 }
 
 .type-segment button.active {
@@ -2168,13 +2400,9 @@ dialog::backdrop {
   transition: background 140ms ease, box-shadow 140ms ease;
 }
 
-#itemDialog[data-item-type="할일"] #endDateField .date-editor-field {
-  display: none;
-}
-
 #itemDialog[data-item-type="할일"] .editor-date-time-fields {
   grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(62px, auto) minmax(62px, auto);
+  grid-template-rows: minmax(68px, auto) minmax(68px, auto);
   column-gap: 10px;
 }
 
@@ -2188,12 +2416,12 @@ dialog::backdrop {
   align-self: stretch;
   display: grid;
   place-items: center;
-  min-height: 62px;
+  min-height: 68px;
   border-top: 1px solid #302a26;
 }
 
 #itemDialog[data-item-type="할일"] .start-date-time-row .date-editor-field {
-  grid-column: 2 / 4;
+  grid-column: 2;
   grid-row: 1;
   align-self: stretch;
   justify-content: start;
@@ -2205,18 +2433,25 @@ dialog::backdrop {
 
 #itemDialog[data-item-type="할일"] .start-date-time-row .time-editor-field,
 #itemDialog[data-item-type="할일"] #endDateField .time-editor-field {
-  grid-row: 2;
   align-self: stretch;
   justify-content: center;
-  min-height: 62px;
+  min-height: 68px;
   border-top: 1px solid #302a26;
   padding: 8px 0;
 }
 
 #itemDialog[data-item-type="할일"] .start-date-time-row .time-editor-field {
+  grid-column: 3;
+  grid-row: 1;
+  justify-items: end;
+  text-align: right;
+}
+
+#itemDialog[data-item-type="할일"] #endDateField .date-editor-field {
   grid-column: 2;
-  justify-items: start;
-  text-align: left;
+  grid-row: 2;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 #itemDialog[data-item-type="할일"] #endDateField > .editor-icon {
@@ -2225,26 +2460,27 @@ dialog::backdrop {
 
 #itemDialog[data-item-type="할일"] #endDateField .time-editor-field {
   grid-column: 3;
+  grid-row: 2;
   justify-items: end;
   text-align: right;
 }
 
-#itemDialog[data-item-type="루틴"] .editor-date-time-fields {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .editor-date-time-fields {
   grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: minmax(64px, auto);
   column-gap: 10px;
 }
 
-#itemDialog[data-item-type="루틴"] .editor-date-time-row {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .editor-date-time-row {
   display: contents;
 }
 
-#itemDialog[data-item-type="루틴"] .date-editor-field,
-#itemDialog[data-item-type="루틴"] #endDateField > .editor-icon {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .date-editor-field,
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) #endDateField > .editor-icon {
   display: none;
 }
 
-#itemDialog[data-item-type="루틴"] .start-date-time-row > .editor-icon {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .start-date-time-row > .editor-icon {
   grid-column: 1;
   grid-row: 1;
   align-self: stretch;
@@ -2254,8 +2490,8 @@ dialog::backdrop {
   border-top: 1px solid #302a26;
 }
 
-#itemDialog[data-item-type="루틴"] .start-date-time-row .time-editor-field,
-#itemDialog[data-item-type="루틴"] #endDateField .time-editor-field {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .start-date-time-row .time-editor-field,
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) #endDateField .time-editor-field {
   grid-row: 1;
   align-self: stretch;
   justify-content: center;
@@ -2264,13 +2500,13 @@ dialog::backdrop {
   padding: 8px 0;
 }
 
-#itemDialog[data-item-type="루틴"] .start-date-time-row .time-editor-field {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) .start-date-time-row .time-editor-field {
   grid-column: 2;
   justify-items: start;
   text-align: left;
 }
 
-#itemDialog[data-item-type="루틴"] #endDateField .time-editor-field {
+:is(#itemDialog[data-item-type="루틴"], #itemDialog[data-item-type="고정일정"]) #endDateField .time-editor-field {
   grid-column: 3;
   justify-items: end;
   text-align: right;
@@ -2355,14 +2591,14 @@ dialog::backdrop {
 }
 
 .picker-panel {
-  position: absolute;
-  top: var(--picker-top, 0);
-  right: var(--dialog-inline-padding);
-  left: var(--dialog-inline-padding);
+  position: fixed;
+  top: 50%;
+  left: 50%;
   z-index: 20;
   display: grid;
+  width: min(420px, calc(100vw - 32px));
   gap: 12px;
-  max-height: min(380px, var(--picker-max-height, 360px));
+  max-height: min(360px, var(--picker-max-height, 360px));
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid #4a382b;
@@ -2375,6 +2611,7 @@ dialog::backdrop {
   background-size: auto, 480px 480px;
   box-shadow: 0 16px 38px rgb(0 0 0 / 34%);
   padding: 12px;
+  transform: translate(-50%, -50%);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -2511,6 +2748,7 @@ dialog::backdrop {
   overscroll-behavior: contain;
   padding: 75px 0;
   scrollbar-width: none;
+  scroll-behavior: smooth;
   scroll-snap-type: y mandatory;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
@@ -2531,12 +2769,14 @@ dialog::backdrop {
   font-size: 22px;
   padding: 0;
   touch-action: manipulation;
+  transition: color 90ms ease, font-size 90ms ease, transform 90ms ease;
 }
 
 .time-wheel-option.selected {
   color: #f8f3ef;
   font-size: 26px;
   font-weight: 650;
+  transform: scale(1.02);
 }
 
 .picker-footer {
@@ -2610,6 +2850,10 @@ dialog::backdrop {
     padding: 5px;
   }
 
+  .timeline-layer .timeline-item.fixed-event-item {
+    grid-template-columns: 36px minmax(0, 1fr) 34px 26px;
+  }
+
   .timeline-resize-handle {
     right: 2px;
     left: 2px;
@@ -2629,6 +2873,13 @@ dialog::backdrop {
     height: 24px;
     min-width: 24px;
     min-height: 24px;
+  }
+
+  .timeline-layer .timeline-item .fixed-skip-button {
+    width: 34px;
+    min-width: 34px;
+    min-height: 24px;
+    font-size: 8px;
   }
 
   .timeline-layer .timeline-item .edit-button {
@@ -2698,10 +2949,14 @@ dialog::backdrop {
 
   .day-number {
     font-size: 12px;
+    line-height: 21px;
+    min-width: 21px;
+    min-height: 21px;
+    padding: 0 5px;
   }
 
   .holiday-label {
-    top: 4px;
+    top: 15.5px;
     right: 4px;
     height: 11px;
     max-width: calc(100% - 20px);

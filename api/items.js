@@ -78,6 +78,12 @@ async function listItems(req, res) {
           {
             property: "유형",
             select: {
+              equals: "고정일정"
+            }
+          },
+          {
+            property: "유형",
+            select: {
               equals: "감정"
             }
           }
@@ -268,7 +274,7 @@ async function trashItem(req, res) {
 }
 
 function sanitizePayload(input, isPatch) {
-  const allowedTypes = new Set(["일정", "할일", "루틴", "루틴기록", "감정", "기분", "챌린지"]);
+  const allowedTypes = new Set(["일정", "고정일정", "할일", "루틴", "루틴기록", "감정", "기분", "챌린지"]);
   const allowedStatuses = new Set(["예정", "진행", "완료", "보류", "취소"]);
   const allowedDays = new Set(["월", "화", "수", "목", "금", "토", "일"]);
   const allowedEmotions = new Set([
@@ -289,10 +295,11 @@ function sanitizePayload(input, isPatch) {
     "초록 1"
   ]);
   const body = {};
+  const normalizedType = normalizeTypeValue(input.type);
 
   if (input.id !== undefined) body.id = String(input.id);
   if (input.title !== undefined) body.title = String(input.title).trim();
-  if (input.type !== undefined && allowedTypes.has(input.type)) body.type = input.type;
+  if (input.type !== undefined && allowedTypes.has(normalizedType)) body.type = normalizedType;
   if (input.date !== undefined && isDate(input.date)) body.date = input.date;
   if (input.endDate !== undefined && isDate(input.endDate)) body.endDate = input.endDate;
   if (input.startTime !== undefined && isTime(input.startTime, false)) body.startTime = input.startTime;
@@ -324,8 +331,11 @@ function sanitizePayload(input, isPatch) {
     if (body.type === "루틴") {
       body.status = body.status || "진행";
     }
+    if (body.type === "고정일정") {
+      body.status = body.status || "진행";
+    }
     if (body.type === "루틴기록") {
-      body.status = body.completed ? "완료" : "예정";
+      body.status = body.status || (body.completed ? "완료" : "예정");
     }
     if (body.type === "챌린지") {
       body.status = "완료";
@@ -341,6 +351,21 @@ function sanitizePayload(input, isPatch) {
   }
 
   return body;
+}
+
+function normalizeTypeValue(value) {
+  const normalized = String(value || "").trim();
+  return {
+    "Event": "일정",
+    "Fixed": "고정일정",
+    "Fixed Event": "고정일정",
+    "Task": "할일",
+    "Routine": "루틴",
+    "Routine Log": "루틴기록",
+    "Emotion": "감정",
+    "Mood": "기분",
+    "Challenge": "챌린지"
+  }[normalized] || normalized;
 }
 
 function isDate(value) {

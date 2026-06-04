@@ -123,7 +123,7 @@ function setSessionCookie(res) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${encodeURIComponent(createSessionToken())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_AGE_SECONDS}${secure}`
+    `${SESSION_COOKIE}=${encodeURIComponent(createSessionToken())}; Path=/; HttpOnly; SameSite=Lax${secure}`
   );
 }
 
@@ -274,8 +274,9 @@ function buildNotionProperties(input, schema, detectedTitleProperty) {
     properties["날짜"] = dateProperty(input.date, false, input.endDate);
   }
 
-  const timeDate = input.date || (input.type === "루틴" ? "2000-01-01" : undefined);
-  const endTimeDate = input.endDate || input.date || (input.type === "루틴" ? "2000-01-01" : undefined);
+  const usesTemplateTimeDate = input.type === "루틴" || input.type === "고정일정";
+  const timeDate = input.date || (usesTemplateTimeDate ? "2000-01-01" : undefined);
+  const endTimeDate = input.endDate || input.date || (usesTemplateTimeDate ? "2000-01-01" : undefined);
   const start = input.start !== undefined ? input.start : dateTimeWithOffset(timeDate, input.startTime);
   const end = input.end !== undefined ? input.end : dateTimeWithOffset(endTimeDate, input.endTime);
   if (input.start !== undefined || input.startTime !== undefined) {
@@ -380,7 +381,7 @@ function normalizeItem(page, schema, detectedTitleProperty) {
   const type = selectName(properties["유형"]);
   const start = dateStart(properties["시작"]);
   const end = dateStart(properties["종료"]);
-  const date = dateStart(properties["날짜"]) || (type === "루틴" ? "" : start);
+  const date = dateStart(properties["날짜"]) || (type === "루틴" || type === "고정일정" ? "" : start);
   const endDate = dateEnd(properties["날짜"]);
   const normalizedDate = normalizeDate(date);
   const normalizedEndDate = normalizeDate(endDate);

@@ -46,6 +46,7 @@
               <span></span>
               <span></span>
             </div>
+            <p id="authCatchphrase" class="auth-catchphrase"></p>
             <div class="pin-keypad" aria-label="Number keypad">
               <button type="button" data-pin-key="1">1</button>
               <button type="button" data-pin-key="2">2</button>
@@ -75,6 +76,7 @@
           </div>
           <div class="top-actions">
             <button id="refreshButton" type="button" class="icon-button" title="Refresh">↻</button>
+            <button id="phraseButton" type="button" class="icon-button" title="Login phrase">✎</button>
             <button id="logoutButton" type="button" class="icon-button" title="Log out">⏻</button>
           </div>
         </header>
@@ -116,7 +118,7 @@
             formmethod="dialog"
             formnovalidate
           >Cancel</button>
-          <h2 id="dialogTitle">Add</h2>
+          <h2 id="dialogTitle"></h2>
           <button type="submit" class="dialog-text-button primary-text">Save</button>
         </div>
 
@@ -126,6 +128,7 @@
           Type
           <select id="typeInput" required>
             <option value="일정">Event</option>
+            <option value="고정일정">Fixed</option>
             <option value="할일">Task</option>
             <option value="루틴">Routine</option>
           </select>
@@ -137,6 +140,7 @@
 
         <div class="type-segment" aria-label="Type">
           <button type="button" data-type-choice="일정">Event</button>
+          <button type="button" data-type-choice="고정일정">Fixed</button>
           <button type="button" data-type-choice="할일">Task</button>
           <button type="button" data-type-choice="루틴">Routine</button>
         </div>
@@ -235,6 +239,17 @@
         </div>
         <p class="logout-mood-copy">Choose a color for your next login.</p>
         <div id="logoutMoodContent" class="logout-mood-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="authPhraseDialog" class="auth-phrase-dialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <h2>Login Phrase</h2>
+          <button type="button" id="closeAuthPhraseDialogButton" class="icon-button dialog-close-button" title="Close">×</button>
+        </div>
+        <p class="auth-phrase-copy">Choose a message for the lock screen.</p>
+        <div id="authPhraseContent" class="auth-phrase-content"></div>
       </div>
     </dialog>
 

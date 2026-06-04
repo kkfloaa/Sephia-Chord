@@ -24,6 +24,7 @@ const state = {
   selectedCalendarSchedule: null,
   calendarScheduleResize: null,
   calendarScheduleDrag: null,
+  calendarScheduleDragFrame: null,
   calendarZoom: 1.48,
   calendarZoomGesture: null,
   calendarZoomPulse: false,
@@ -56,9 +57,9 @@ const CALENDAR_ZOOM_MIN = 0.76;
 const CALENDAR_ZOOM_MAX = 1.48;
 const CALENDAR_ZOOM_DEFAULT = CALENDAR_ZOOM_MAX;
 const CALENDAR_ZOOM_STEP = 0.12;
-const CALENDAR_MONTH_SWIPE_DISTANCE = 46;
-const CALENDAR_MONTH_SWIPE_RATIO = 1.08;
-const CALENDAR_MONTH_SWIPE_VISUAL_LIMIT = 82;
+const CALENDAR_MONTH_SWIPE_DISTANCE = 38;
+const CALENDAR_MONTH_SWIPE_RATIO = 0.82;
+const CALENDAR_MONTH_SWIPE_VISUAL_LIMIT = 124;
 const TIMELINE_START_MINUTES = 0;
 const TIMELINE_END_MINUTES = 24 * 60;
 const TIMELINE_ROW_MINUTES = 60;
@@ -71,13 +72,20 @@ const FULL_DAY_END_TIME = "24:00";
 const DEFAULT_START_TIME = "08:00";
 const DEFAULT_END_TIME = "09:00";
 const HAPTIC_DURATION_MS = 8;
-const HAPTIC_MIN_INTERVAL_MS = 70;
-const TIME_WHEEL_SETTLE_DELAY_MS = 140;
+const HAPTIC_MIN_INTERVAL_MS = 52;
+const TIME_WHEEL_SETTLE_DELAY_MS = 90;
+const TIME_WHEEL_WHEEL_PIXEL_STEP = 44;
 const TIME_WHEEL_LOOP_COPIES = 7;
 const TIMELINE_TOUCH_HOLD_DELAY = 260;
 const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
 const AUTH_UNLOCK_ANIMATION_MS = 500;
 const AUTH_MOOD_STORAGE_KEY = "sephia-chord.authMood";
+const AUTH_PHRASE_STORAGE_KEY = "sephia-chord.authPhrase";
+const AUTH_PHRASES = [
+  { id: "chord", text: "Keep your chord" },
+  { id: "rhythm", text: "Move in your rhythm" },
+  { id: "soft", text: "Today can be soft" }
+];
 const CHALLENGE_CANVAS_WIDTH = 720;
 const CHALLENGE_WHITE_THRESHOLD = 250;
 const CHALLENGE_MIN_LAYER_AREA = 400;
@@ -94,6 +102,7 @@ const ROUTINE_DAY_LABELS = {
 };
 const TYPE_LABELS = {
   "일정": "Event",
+  "고정일정": "Fixed",
   "할일": "Task",
   "루틴": "Routine",
   "루틴기록": "Routine Log",
@@ -101,6 +110,9 @@ const TYPE_LABELS = {
   "기분": "Mood",
   "챌린지": "Challenge"
 };
+const TYPE_VALUE_ALIASES = Object.fromEntries(
+  Object.entries(TYPE_LABELS).map(([value, label]) => [label, value])
+);
 const EMOTION_LABELS = {
   "나쁨": "Bad",
   "애매함": "Mixed",
@@ -229,7 +241,10 @@ const els = {
   allDayField: document.querySelector("#allDayField"),
   allDayInput: document.querySelector("#allDayInput"),
   appView: document.querySelector("#appView"),
+  authCatchphrase: document.querySelector("#authCatchphrase"),
   authMessage: document.querySelector("#authMessage"),
+  authPhraseContent: document.querySelector("#authPhraseContent"),
+  authPhraseDialog: document.querySelector("#authPhraseDialog"),
   authUnlockLogo: document.querySelector(".auth-unlock-logo"),
   authView: document.querySelector("#authView"),
   calendarTimelineContent: document.querySelector("#calendarTimelineContent"),
@@ -237,6 +252,7 @@ const els = {
   calendarTimelineTitle: document.querySelector("#calendarTimelineTitle"),
   calendarTab: document.querySelector("#calendarTab"),
   closeCalendarTimelineDialogButton: document.querySelector("#closeCalendarTimelineDialogButton"),
+  closeAuthPhraseDialogButton: document.querySelector("#closeAuthPhraseDialogButton"),
   closeDialogButton: document.querySelector("#closeDialogButton"),
   closeEmotionDialogButton: document.querySelector("#closeEmotionDialogButton"),
   closeLogoutMoodDialogButton: document.querySelector("#closeLogoutMoodDialogButton"),
@@ -260,6 +276,7 @@ const els = {
   logoutMoodDialog: document.querySelector("#logoutMoodDialog"),
   noteInput: document.querySelector("#noteInput"),
   passwordInput: document.querySelector("#passwordInput"),
+  phraseButton: document.querySelector("#phraseButton"),
   pickerPanel: document.querySelector("#pickerPanel"),
   routinesTab: document.querySelector("#routinesTab"),
   routineFields: document.querySelector("#routineFields"),
@@ -280,6 +297,7 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   applyStoredAuthMood();
+  applyStoredAuthPhrase();
   bindEvents();
   await requireLoginOnEntry();
 }
@@ -294,12 +312,14 @@ function bindEvents() {
   bindDialogButtonFeedback();
   document.querySelector("#logoutButton").addEventListener("click", logout);
   document.querySelector("#refreshButton").addEventListener("click", loadItems);
+  els.phraseButton.addEventListener("click", openAuthPhraseDialog);
   els.closeCalendarTimelineDialogButton.addEventListener("click", () => els.calendarTimelineDialog.close());
   els.closeDialogButton.addEventListener("click", cancelItemDialog);
   els.itemDialogBackdrop.addEventListener("pointerdown", handleItemDialogBackdropPress);
   els.itemDialogBackdrop.addEventListener("click", cancelItemDialog);
   els.closeEmotionDialogButton.addEventListener("click", () => els.emotionDialog.close());
   els.closeLogoutMoodDialogButton.addEventListener("click", () => els.logoutMoodDialog.close());
+  els.closeAuthPhraseDialogButton.addEventListener("click", () => els.authPhraseDialog.close());
   els.dialog.addEventListener("pointerdown", closeItemDialogOnOutsidePointer);
   els.dialog.addEventListener("click", closeItemDialogOnOutsidePointer);
   els.dialog.addEventListener("close", handleItemDialogClose);
@@ -400,10 +420,12 @@ function bindEvents() {
     if (action.dataset.action === "select-timeline-item") {
       event.stopPropagation();
       const context = timelineContextFromAction(action);
-      if (selectedTimelineItemMatches(id, context) && event.detail > 1) {
+      const isSelected = selectedTimelineItemMatches(id, context);
+      if (isSelected && event.detail > 1) {
         await deleteTimelineItem(id);
         return;
       }
+      if (isSelected) return;
       selectTimelineItem(id, context);
       return;
     }
@@ -415,7 +437,13 @@ function bindEvents() {
         await deleteCalendarSchedule(id);
         return;
       }
+      if (isSelected) return;
       selectCalendarSchedule(id, action.dataset.date);
+      return;
+    }
+    if (action.dataset.action === "choose-calendar-span-edge") {
+      event.stopPropagation();
+      await adjustCalendarScheduleSpan(id, action.dataset.calendarSpanEdge);
       return;
     }
     if (action.dataset.action === "toggle-task") {
@@ -426,6 +454,10 @@ function bindEvents() {
       event.stopPropagation();
       await toggleRoutine(id);
     }
+    if (action.dataset.action === "skip-fixed-schedule") {
+      event.stopPropagation();
+      await skipFixedSchedule(id, action.dataset.date || state.selectedDate);
+    }
     if (action.dataset.action === "set-emotion") {
       event.stopPropagation();
       markEmotionSelection(action.dataset.emotion);
@@ -434,6 +466,10 @@ function bindEvents() {
     if (action.dataset.action === "choose-logout-mood") {
       event.stopPropagation();
       await chooseLogoutMood(action.dataset.emotion);
+    }
+    if (action.dataset.action === "choose-auth-phrase") {
+      event.stopPropagation();
+      chooseAuthPhrase(action.dataset.phraseId);
     }
     if (action.dataset.action === "open-challenge-gallery") {
       event.stopPropagation();
@@ -511,7 +547,7 @@ function bindEvents() {
     }
 
     const card = event.target.closest(".timeline-item");
-    if (card && !event.target.closest(".checkbox, .edit-button") && canSelectTimelineItem(findItem(card.dataset.timelineId))) {
+    if (card && !event.target.closest(".checkbox, .fixed-skip-button, .edit-button") && canSelectTimelineItem(findItem(card.dataset.timelineId))) {
       event.preventDefault();
       event.stopPropagation();
       await deleteTimelineItem(card.dataset.timelineId);
@@ -707,6 +743,7 @@ async function chooseLogoutMood(emotion) {
 
 async function unlockAppAfterLogin() {
   state.authenticated = true;
+  resetStateForLoginEntry();
   els.appView.hidden = false;
   const loadPromise = loadItems();
   await playAuthUnlockAnimation();
@@ -715,7 +752,22 @@ async function unlockAppAfterLogin() {
   await loadPromise;
 }
 
+function resetStateForLoginEntry() {
+  const today = todayString();
+  state.tab = "today";
+  state.selectedDate = today;
+  state.visibleMonth = monthStart(today);
+  state.calendarSelectedDate = null;
+  state.selectedCalendarSchedule = null;
+  state.selectedEmotionDate = null;
+  state.selectedChallengeLayer = null;
+  state.calendarZoomGesture = null;
+  resetCalendarZoom(false);
+  clearSelectedTimelineRange();
+}
+
 function playAuthUnlockAnimation() {
+  els.authView.classList.remove("is-glitching");
   els.authView.classList.add("is-unlocking");
   return new Promise((resolve) => {
     window.setTimeout(() => {
@@ -733,11 +785,13 @@ function lockAppForNextEntry() {
 function lockAppView() {
   state.authenticated = false;
   applyStoredAuthMood();
+  applyStoredAuthPhrase();
   document.documentElement.classList.remove("fixed-tab");
   document.body.classList.remove("fixed-tab");
   document.body.removeAttribute("data-active-tab");
   els.appView.removeAttribute("data-tab");
   els.authView.classList.remove("is-unlocking");
+  els.authView.classList.remove("is-glitching");
   setPinValue("");
   if (els.calendarTimelineDialog.open) els.calendarTimelineDialog.close();
   if (els.dialog.open) els.dialog.close();
@@ -784,7 +838,7 @@ function appendPinDigit(digit) {
   if (els.authView.hidden || state.pinSubmitting || !/^\d$/.test(String(digit))) return;
   if (els.passwordInput.value.length >= PIN_LENGTH) return;
   setPinValue(`${els.passwordInput.value}${digit}`);
-  pulseAuthLogoGlitch();
+  pulseAuthScreenGlitch();
   if (els.passwordInput.value.length === PIN_LENGTH) {
     window.setTimeout(() => els.loginForm.requestSubmit(), 120);
   }
@@ -793,7 +847,7 @@ function appendPinDigit(digit) {
 function deletePinDigit() {
   if (els.authView.hidden || state.pinSubmitting) return;
   setPinValue(els.passwordInput.value.slice(0, -1));
-  pulseAuthLogoGlitch();
+  pulseAuthScreenGlitch();
 }
 
 function setPinValue(value) {
@@ -810,11 +864,11 @@ function updatePinDots() {
   });
 }
 
-function pulseAuthLogoGlitch() {
-  if (!els.authUnlockLogo || els.authView.hidden) return;
-  els.authUnlockLogo.classList.remove("is-glitching");
-  void els.authUnlockLogo.offsetWidth;
-  els.authUnlockLogo.classList.add("is-glitching");
+function pulseAuthScreenGlitch() {
+  if (!els.authView || els.authView.hidden) return;
+  els.authView.classList.remove("is-glitching");
+  void els.authView.offsetWidth;
+  els.authView.classList.add("is-glitching");
 }
 
 function handlePinKeydown(event) {
@@ -854,13 +908,17 @@ async function loadItems() {
 }
 
 function render() {
-  els.selectedDateLabel.textContent = humanDate(state.selectedDate);
+  els.selectedDateLabel.textContent = humanDate(topbarDisplayDate());
   renderTabs();
   renderToday();
   renderCalendar();
   renderCalendarTimelineDialog();
   renderEmotionTab();
   renderRoutines();
+}
+
+function topbarDisplayDate() {
+  return state.tab === "calendar" ? todayString() : state.selectedDate;
 }
 
 function renderTabs() {
@@ -884,11 +942,11 @@ function renderTabs() {
     routines: els.routinesTab
   }[state.tab];
   activeView.hidden = false;
-  updateFixedTabMetrics();
+  updateFixedTabMetrics({ immediate: true });
 }
 
-function updateFixedTabMetrics() {
-  window.requestAnimationFrame(() => {
+function updateFixedTabMetrics(options = {}) {
+  const apply = () => {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
     const topbarBottom = document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 78;
     const bottomNavTop = document.querySelector(".bottom-nav")?.getBoundingClientRect().top ?? (viewportHeight - 64);
@@ -897,7 +955,14 @@ function updateFixedTabMetrics() {
 
     document.documentElement.style.setProperty("--fixed-content-top", `${contentTop}px`);
     document.documentElement.style.setProperty("--fixed-content-bottom", `${contentBottom}px`);
-  });
+  };
+
+  if (options.immediate) {
+    apply();
+    return;
+  }
+
+  window.requestAnimationFrame(apply);
 }
 
 function handleViewportResize() {
@@ -921,7 +986,10 @@ function renderToday() {
 }
 
 function timelineItemsForDate(date) {
-  const schedules = itemsFor("일정", date).sort(byStartTime);
+  const schedules = [
+    ...itemsFor("일정", date),
+    ...activeFixedSchedules(date).map((item) => fixedScheduleTimelineItem(item, date))
+  ].sort(byStartTime);
   const todos = itemsFor("할일", date).sort(byDoneThenTitle);
   const timedTodos = todos
     .filter((item) => item.startTime)
@@ -972,6 +1040,9 @@ function renderSchedulePill(block, context) {
   const check = item.type === "할일" || item.type === "루틴"
     ? `<button type="button" class="checkbox" data-action="${item.type === "루틴" ? "toggle-routine" : "toggle-task"}" data-id="${item.id}">${done ? '<span class="checkmark">✓</span>' : ""}</button>`
     : `<span class="tag">${escapeHtml(displayType(item.type))}</span>`;
+  const fixedSkipButton = item.type === "고정일정"
+    ? `<button type="button" class="fixed-skip-button" data-action="skip-fixed-schedule" data-id="${item.id}" data-date="${item.date || state.selectedDate}">SKIP</button>`
+    : "";
   const cardAction = selectable ? "select-timeline-item" : "edit";
   const typeClass = timelineTypeClass(item.type);
 
@@ -990,6 +1061,7 @@ function renderSchedulePill(block, context) {
         <span class="item-title">${escapeHtml(item.title)}</span>
         <span class="item-meta">${timelineItemTimeMeta(item)}</span>
       </button>
+      ${fixedSkipButton}
       <button type="button" class="edit-button" data-action="edit" data-id="${item.id}">›</button>
       ${selectable ? `
         <span class="timeline-resize-handle resize-start" data-resize-edge="start" aria-hidden="true"></span>
@@ -1001,9 +1073,18 @@ function renderSchedulePill(block, context) {
 
 function timelineTypeClass(type) {
   if (type === "일정") return "event-item";
+  if (type === "고정일정") return "event-item fixed-event-item";
   if (type === "할일") return "task-item";
   if (type === "루틴") return "routine-item";
   return "";
+}
+
+function fixedScheduleTimelineItem(schedule, date) {
+  return {
+    ...schedule,
+    date,
+    endDate: date
+  };
 }
 
 function routineTimelineItem(routine) {
@@ -1100,11 +1181,67 @@ function renderCalendar() {
       <div class="month-header">
         <h2>${monthLabel}</h2>
       </div>
-      <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount, days.length / 7)}">
-        ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
-        ${days.map((day) => renderCalendarDay(day, scheduleRows)).join("")}
+      <div class="calendar-stage">
+        <div class="${calendarClasses}" style="${calendarZoomStyle(scheduleRowCount, days.length / 7)}">
+          ${DAYS.map((day) => `<div class="weekday">${day}</div>`).join("")}
+          ${days.map((day) => renderCalendarDay(day, scheduleRows)).join("")}
+        </div>
+        ${renderCalendarScheduleControl()}
       </div>
     </section>
+  `;
+}
+
+function renderCalendarScheduleControl() {
+  const selection = state.selectedCalendarSchedule;
+  const item = selection ? findItem(selection.id) : null;
+  if (!item || item.type !== "일정") return "";
+
+  const range = selectedDateRange(item.date, item.endDate || item.date);
+  const grabbedDate = selection.date && selection.date >= range.startDate && selection.date <= range.endDate
+    ? selection.date
+    : range.startDate;
+  const title = String(item.title || "").trim() || "Untitled";
+  const dateText = range.startDate === range.endDate
+    ? range.startDate
+    : `${range.startDate} - ${range.endDate}`;
+  const timeText = item.startTime || item.endTime
+    ? `${item.startTime || ""}${item.endTime ? ` - ${item.endTime}` : ""}`
+    : "";
+
+  return `
+    <div
+      class="calendar-schedule-control"
+      data-calendar-schedule-control
+      data-id="${item.id}"
+      data-date="${grabbedDate}"
+    >
+      <button
+        type="button"
+        class="calendar-control-grip resize-left"
+        data-action="choose-calendar-span-edge"
+        data-calendar-span-edge="start"
+        data-id="${item.id}"
+        aria-label="Adjust start date"
+      >‹</button>
+      <button
+        type="button"
+        class="calendar-control-main"
+        data-calendar-control-action="move"
+        aria-label="Move event"
+      >
+        <span class="calendar-control-title">${escapeHtml(title)}</span>
+        <span class="calendar-control-meta">${escapeHtml([dateText, timeText].filter(Boolean).join(" · "))}</span>
+      </button>
+      <button
+        type="button"
+        class="calendar-control-grip resize-right"
+        data-action="choose-calendar-span-edge"
+        data-calendar-span-edge="end"
+        data-id="${item.id}"
+        aria-label="Adjust end date"
+      >›</button>
+    </div>
   `;
 }
 
@@ -1174,10 +1311,12 @@ function renderCalendarDay(day, scheduleRows = {}) {
   const schedules = calendarSchedulesForDate(day.date).sort(byStartTime);
   const mark = koreanCalendarMark(day.date);
   const isSelected = day.date === state.calendarSelectedDate;
+  const isToday = day.date === todayString();
   const classes = [
     "day-cell",
     mark ? "has-calendar-mark" : "",
     mark ? `calendar-mark-${mark.kind}` : "",
+    isToday ? "today" : "",
     day.inMonth ? "" : "muted",
     isSelected ? "selected" : ""
   ].filter(Boolean).join(" ");
@@ -1578,6 +1717,14 @@ function storedAuthMood() {
   }
 }
 
+function storedAuthPhraseId() {
+  try {
+    return window.localStorage.getItem(AUTH_PHRASE_STORAGE_KEY) || AUTH_PHRASES[0].id;
+  } catch {
+    return AUTH_PHRASES[0].id;
+  }
+}
+
 function storeAuthMood(emotion) {
   try {
     window.localStorage.setItem(AUTH_MOOD_STORAGE_KEY, emotion);
@@ -1586,8 +1733,58 @@ function storeAuthMood(emotion) {
   }
 }
 
+function storeAuthPhrase(id) {
+  try {
+    window.localStorage.setItem(AUTH_PHRASE_STORAGE_KEY, id);
+  } catch {
+    // The selected phrase still updates the current lock screen.
+  }
+}
+
 function applyStoredAuthMood() {
   applyAuthMood(storedAuthMood());
+}
+
+function applyStoredAuthPhrase() {
+  applyAuthPhrase(storedAuthPhraseId());
+}
+
+function applyAuthPhrase(id) {
+  if (!els.authCatchphrase) return;
+  const phrase = authPhraseById(id);
+  els.authCatchphrase.textContent = phrase.text;
+}
+
+function authPhraseById(id) {
+  return AUTH_PHRASES.find((phrase) => phrase.id === id) || AUTH_PHRASES[0];
+}
+
+function openAuthPhraseDialog() {
+  if (!els.authPhraseDialog || !els.authPhraseContent) return;
+  els.authPhraseContent.innerHTML = renderAuthPhraseChoices(storedAuthPhraseId());
+  if (!els.authPhraseDialog.open) els.authPhraseDialog.showModal();
+}
+
+function renderAuthPhraseChoices(selectedId) {
+  return `
+    <div class="auth-phrase-list" aria-label="Login phrase choices">
+      ${AUTH_PHRASES.map((phrase) => `
+        <button
+          type="button"
+          class="auth-phrase-choice ${phrase.id === selectedId ? "selected" : ""}"
+          data-action="choose-auth-phrase"
+          data-phrase-id="${phrase.id}"
+        >${escapeHtml(phrase.text)}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function chooseAuthPhrase(id) {
+  const phrase = authPhraseById(id);
+  storeAuthPhrase(phrase.id);
+  applyAuthPhrase(phrase.id);
+  if (els.authPhraseDialog.open) els.authPhraseDialog.close();
 }
 
 function applyAuthMood(emotion) {
@@ -1720,10 +1917,12 @@ function renderCalendarScheduleChips(schedules, date, scheduleRows = {}) {
   return decorated.map(({ rangeClass, resizing, row, schedule, selected, showTitle, title }) => {
     const label = showTitle ? escapeHtml(title) : "&nbsp;";
     const rangeTokens = rangeClass.split(/\s+/);
-    const canResizeStart = selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-start"));
-    const canResizeEnd = selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-end"));
+    const fixedSchedule = isFixedScheduleType(schedule.type);
+    const canResizeStart = !fixedSchedule && selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-start"));
+    const canResizeEnd = !fixedSchedule && selected && (rangeTokens.includes("single") || rangeTokens.includes("segment-end"));
     const chipClass = [
       "schedule-chip",
+      fixedSchedule ? "fixed-schedule-chip" : "",
       rangeClass,
       showTitle ? "has-title" : "continuation",
       selected ? "selected" : "",
@@ -1734,7 +1933,7 @@ function renderCalendarScheduleChips(schedules, date, scheduleRows = {}) {
       <span
         class="${chipClass}"
         title="${escapeHtml(title)}"
-        data-action="select-calendar-schedule"
+        data-action="${fixedSchedule ? "edit" : "select-calendar-schedule"}"
         data-id="${schedule.id}"
         data-date="${date}"
         style="--schedule-row:${row};"
@@ -1753,9 +1952,9 @@ function calendarDecoratedSchedules(schedules, date, scheduleRows = {}) {
     const rangeTokens = rangeClass.split(/\s+/);
     const showTitle = rangeTokens.includes("single") || rangeTokens.includes("segment-start");
     const title = String(schedule.title || "").trim() || "Untitled";
-    const selected = selectedCalendarScheduleMatches(schedule.id);
+    const selected = schedule.type === "일정" && selectedCalendarScheduleMatches(schedule.id);
     const resizing = calendarScheduleIsResizing(schedule.id);
-    const row = scheduleRows[schedule.id] || 0;
+    const row = scheduleRows[calendarScheduleRowKey(schedule)] || 0;
 
     return { rangeClass, resizing, row, schedule, showTitle, title, selected };
   });
@@ -1787,11 +1986,15 @@ function calendarScheduleItemsForRows(days, excludedId = null) {
   const rangeEnd = days[days.length - 1]?.date;
   if (!rangeStart || !rangeEnd) return [];
 
-  return state.items
-    .filter((item) => item.type === "일정" && item.id !== excludedId)
-    .map(calendarScheduleVisualItem)
-    .filter((item) => isItemRangeOnCalendar(item, rangeStart, rangeEnd))
-    .sort(byCalendarScheduleOrder);
+  return [
+    ...state.items
+      .filter((item) => item.type === "일정" && item.id !== excludedId)
+      .map(calendarScheduleVisualItem)
+      .filter((item) => isItemRangeOnCalendar(item, rangeStart, rangeEnd)),
+    ...days.flatMap((day) =>
+      activeFixedSchedules(day.date).map((item) => fixedScheduleCalendarItem(item, day.date))
+    )
+  ].sort(byCalendarScheduleOrder);
 }
 
 function assignCalendarScheduleRows(schedules) {
@@ -1803,7 +2006,7 @@ function assignCalendarScheduleRows(schedules) {
     const row = rowEndDates.findIndex((endDate) => endDate < range.startDate);
     const rowIndex = row === -1 ? rowEndDates.length : row;
     rowEndDates[rowIndex] = range.endDate;
-    rows[schedule.id] = rowIndex;
+    rows[calendarScheduleRowKey(schedule)] = rowIndex;
   });
 
   return rows;
@@ -1893,10 +2096,26 @@ function calendarScheduleTimeValue(time) {
 }
 
 function calendarSchedulesForDate(date) {
-  return state.items
-    .filter((item) => item.type === "일정")
-    .map(calendarScheduleVisualItem)
-    .filter((item) => isItemOnDate(item, date));
+  return [
+    ...state.items
+      .filter((item) => item.type === "일정")
+      .map(calendarScheduleVisualItem)
+      .filter((item) => isItemOnDate(item, date)),
+    ...activeFixedSchedules(date).map((item) => fixedScheduleCalendarItem(item, date))
+  ];
+}
+
+function fixedScheduleCalendarItem(schedule, date) {
+  return {
+    ...schedule,
+    date,
+    endDate: date,
+    calendarRowKey: `${schedule.id}:${date}`
+  };
+}
+
+function calendarScheduleRowKey(schedule) {
+  return schedule.calendarRowKey || schedule.id;
 }
 
 function calendarScheduleVisualItem(item) {
@@ -2163,14 +2382,14 @@ function cancelItemDialog() {
 
 function openItemDialog(type, item, defaults = {}) {
   state.editingItem = item || null;
-  const selectedType = item ? item.type : type || "일정";
+  const selectedType = normalizeItemType(item ? item.type : type || "일정");
   closePicker();
   rememberItemDialogReturnTarget();
   if (els.calendarTimelineDialog.open) {
     els.calendarTimelineDialog.close();
   }
 
-  els.dialogTitle.textContent = item ? "Edit" : "Add";
+  els.dialogTitle.textContent = "";
   els.editingId.value = item ? item.id : "";
   els.typeInput.value = selectedType;
   els.titleInput.value = item ? item.title : "";
@@ -2207,17 +2426,18 @@ function openCalendarScheduleDialog(date) {
 
 function updateFormVisibility() {
   closePicker();
-  const type = els.typeInput.value;
-  const usesTime = type === "일정" || type === "할일" || type === "루틴";
+  const type = normalizeItemType(els.typeInput.value);
+  if (els.typeInput.value !== type) els.typeInput.value = type;
+  const usesTime = isTimedItemType(type);
   syncTypeChoices(type);
   els.dialog.dataset.itemType = type;
   els.dateFields.hidden = !usesTime;
   els.endDateField.hidden = !usesTime;
   els.allDayField.hidden = type !== "일정" && type !== "할일";
   els.scheduleFields.hidden = !usesTime;
-  els.routineFields.hidden = type !== "루틴";
+  els.routineFields.hidden = !isRecurringTemplateType(type);
   syncDateTimeFieldLabels(type);
-  if (type === "루틴") els.allDayInput.checked = false;
+  if (isRecurringTemplateType(type)) els.allDayInput.checked = false;
   applyAllDayTime();
 }
 
@@ -2227,12 +2447,8 @@ function syncDateTimeFieldLabels(type) {
   if (startDateLabel) startDateLabel.textContent = type === "일정" ? "Start date" : "Date";
   if (endDateLabel) endDateLabel.textContent = type === "일정" ? "End date" : "Date";
 
-  els.startTimeLabel.textContent = type === "일정" ? "Time" : "Start";
-  els.endTimeLabel.textContent = type === "일정"
-    ? "Time"
-    : type === "할일"
-      ? "Due"
-      : "End";
+  els.startTimeLabel.textContent = type === "루틴" || type === "고정일정" ? "Start" : "Time";
+  els.endTimeLabel.textContent = type === "루틴" || type === "고정일정" ? "End" : "Time";
 }
 
 function applyAllDayTime() {
@@ -2289,24 +2505,10 @@ function openPicker(input, options = {}) {
 }
 
 function positionPickerPanel() {
-  if (!els.pickerPanel || !els.itemForm || !els.dateFields) return;
-  const formRect = els.itemForm.getBoundingClientRect();
-  const anchorRect = els.dateFields.getBoundingClientRect();
-  const dialogRect = els.dialog.getBoundingClientRect();
-  const preferredHeight = state.picker?.type === "time" ? 290 : 330;
-  const visualTopLimit = formRect.top + 12;
-  const visualBottomLimit = Math.min(
-    window.innerHeight || document.documentElement.clientHeight || 720,
-    dialogRect.bottom
-  ) - 12;
-  const naturalVisualTop = anchorRect.bottom + 8;
-  const visualTop = Math.max(
-    visualTopLimit,
-    Math.min(naturalVisualTop, visualBottomLimit - preferredHeight)
-  );
-  const top = Math.max(12, visualTop - formRect.top + els.itemForm.scrollTop);
-  const maxHeight = Math.max(220, visualBottomLimit - visualTop);
-  els.pickerPanel.style.setProperty("--picker-top", `${Math.round(top)}px`);
+  if (!els.pickerPanel) return;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
+  const safeVerticalPadding = state.picker?.type === "time" ? 96 : 76;
+  const maxHeight = Math.max(280, viewportHeight - safeVerticalPadding);
   els.pickerPanel.style.setProperty("--picker-max-height", `${Math.round(maxHeight)}px`);
 }
 
@@ -2561,7 +2763,8 @@ function handleTimeWheelWheel(event) {
   const nearest = nearestTimeWheelOption(column);
   const currentIndex = selectedIndex >= 0 ? selectedIndex : nearest?.index || 0;
   const direction = delta > 0 ? 1 : -1;
-  const nextIndex = (currentIndex + direction + options.length) % options.length;
+  const stepCount = Math.max(1, Math.min(3, Math.round(Math.abs(delta) / TIME_WHEEL_WHEEL_PIXEL_STEP)));
+  const nextIndex = (currentIndex + direction * stepCount + options.length) % options.length;
   const nextTime = timeForWheelOption(options[nextIndex]);
   if (nextTime) selectPickerTime(nextTime);
 }
@@ -2670,7 +2873,12 @@ function middleWheelCopyForOption(option) {
 function centerTimeWheelOption(column, option) {
   state.timeWheelProgrammaticScroll = true;
   const targetTop = option.offsetTop - (column.clientHeight - option.offsetHeight) / 2;
-  column.scrollTop = Math.max(0, targetTop);
+  const top = Math.max(0, targetTop);
+  if (typeof column.scrollTo === "function") {
+    column.scrollTo({ top, behavior: "smooth" });
+  } else {
+    column.scrollTop = top;
+  }
   window.setTimeout(() => {
     state.timeWheelProgrammaticScroll = false;
   }, TIME_WHEEL_SETTLE_DELAY_MS);
@@ -2825,7 +3033,13 @@ async function saveItem(event) {
     return;
   }
   closePicker();
-  const type = els.typeInput.value;
+  const type = normalizeItemType(
+    els.typeInput.value ||
+    document.querySelector("[data-type-choice].active")?.dataset.typeChoice ||
+    state.editingItem?.type ||
+    "일정"
+  );
+  els.typeInput.value = type;
   const id = els.editingId.value;
   const payload = {
     title: els.titleInput.value,
@@ -2833,17 +3047,17 @@ async function saveItem(event) {
     note: els.noteInput.value
   };
 
-  if (type !== "루틴") payload.date = els.dateInput.value || state.selectedDate;
+  if (!isRecurringTemplateType(type)) payload.date = els.dateInput.value || state.selectedDate;
   if (type === "일정") payload.endDate = els.endDateInput.value || payload.date;
   if ((type === "일정" || type === "할일") && els.allDayInput.checked) {
     els.startTimeInput.value = FULL_DAY_START_TIME;
     els.endTimeInput.value = FULL_DAY_END_TIME;
   }
-  if (type === "일정" || type === "할일" || type === "루틴") {
+  if (isTimedItemType(type)) {
     payload.startTime = els.startTimeInput.value;
     payload.endTime = els.endTimeInput.value;
   }
-  if (type === "루틴") {
+  if (isRecurringTemplateType(type)) {
     payload.repeatDays = [...document.querySelectorAll('[name="repeatDay"]:checked')].map((input) => input.value);
   }
 
@@ -2927,11 +3141,11 @@ function rememberItemTime(item) {
 
 function applyRememberedItemTime(item) {
   const remembered = item && state.itemTimeMemory[item.id];
-  if (!remembered || (item.type !== "할일" && item.type !== "루틴")) return item;
+  if (!remembered || (item.type !== "할일" && !isRecurringTemplateType(item.type))) return item;
 
   return {
     ...item,
-    date: item.type === "루틴" ? item.date : item.date || remembered.date,
+    date: isRecurringTemplateType(item.type) ? item.date : item.date || remembered.date,
     startTime: item.startTime || remembered.startTime,
     endTime: item.endTime || remembered.endTime
   };
@@ -2969,6 +3183,39 @@ async function toggleRoutine(id) {
   const challengeMessage = completed ? await awardChallengeFill() : "";
   await loadItems();
   if (challengeMessage) setStatus(challengeMessage);
+}
+
+async function skipFixedSchedule(id, date = state.selectedDate) {
+  const schedule = findItem(id);
+  if (!schedule || schedule.type !== "고정일정" || !isDateString(date)) return;
+
+  const existing = routineRecord(id, date);
+  if (existing) {
+    await api("/api/items", {
+      method: "PATCH",
+      body: {
+        id: existing.id,
+        completed: false,
+        status: "취소"
+      }
+    });
+  } else {
+    await api("/api/items", {
+      method: "POST",
+      body: {
+        title: `${schedule.title} skip`,
+        type: "루틴기록",
+        date,
+        completed: false,
+        status: "취소",
+        sourceRoutineId: schedule.id
+      }
+    });
+  }
+
+  state.selectedTimelineItem = null;
+  clearSelectedTimelineRange();
+  await loadItems();
 }
 
 function startTimeSelection(event) {
@@ -3239,7 +3486,7 @@ function cancelTimelineItemResize() {
 
 function startTimelineItemDrag(event) {
   const card = event.target.closest(".timeline-item");
-  if (!card || event.target.closest(".checkbox, .edit-button, .timeline-resize-handle, input, textarea, select")) return;
+  if (!card || event.target.closest(".checkbox, .fixed-skip-button, .edit-button, .timeline-resize-handle, input, textarea, select")) return;
 
   const timeline = card.closest(".timeline");
   if (!timeline) return;
@@ -3317,7 +3564,7 @@ async function updateTimelineItemTime(item, startTime, endTime) {
     endTime
   };
 
-  if (item.type !== "루틴") {
+  if (!isRecurringTemplateType(item.type)) {
     body.date = item.date || state.selectedDate;
   }
   if (item.type === "일정") {
@@ -3445,7 +3692,7 @@ function timelineRangeText(startIndex, span) {
 function selectCalendarSchedule(id, date) {
   const item = findItem(id);
   if (!item || item.type !== "일정") return;
-  state.selectedCalendarSchedule = { id };
+  state.selectedCalendarSchedule = { id, date };
   state.calendarSelectedDate = null;
   state.selectedDate = date || item.date || state.selectedDate;
   clearSelectedTimelineRange();
@@ -3461,6 +3708,25 @@ function registerCalendarScheduleTap(id) {
   const lastTap = state.lastCalendarScheduleTap;
   state.lastCalendarScheduleTap = { id, at: now };
   return Boolean(lastTap && lastTap.id === id && now - lastTap.at <= 360);
+}
+
+async function adjustCalendarScheduleSpan(id, edge) {
+  const item = findItem(id);
+  if (!item || item.type !== "일정" || (edge !== "start" && edge !== "end")) return;
+
+  const range = selectedDateRange(item.date, item.endDate || item.date);
+  const startDate = edge === "start" ? addDays(range.startDate, -1) : range.startDate;
+  const endDate = edge === "end" ? addDays(range.endDate, 1) : range.endDate;
+  state.selectedCalendarSchedule = { id: item.id, date: edge === "start" ? startDate : endDate };
+  state.calendarSelectedDate = null;
+  clearSelectedTimelineRange();
+
+  try {
+    await updateCalendarScheduleRange(item, startDate, endDate);
+  } catch (error) {
+    setStatus(error.message || "Could not update the event range.");
+    render();
+  }
 }
 
 async function deleteCalendarSchedule(id) {
@@ -3481,29 +3747,43 @@ async function deleteCalendarSchedule(id) {
   }
 }
 
+function suppressCalendarInteractionAfterScheduleGesture() {
+  state.suppressCalendarScheduleClick = true;
+  state.suppressCalendarClick = true;
+  window.setTimeout(() => {
+    state.suppressCalendarScheduleClick = false;
+    state.suppressCalendarClick = false;
+  }, 380);
+}
+
 function startCalendarScheduleResize(event) {
   const handle = event.target.closest("[data-calendar-resize-edge]");
   if (!handle) return;
 
   const chip = handle.closest(".schedule-chip");
-  const item = findItem(chip?.dataset.id);
-  if (!chip || !item || item.type !== "일정" || !selectedCalendarScheduleMatches(item.id)) return;
+  const control = handle.closest("[data-calendar-schedule-control]");
+  const id = chip?.dataset.id || control?.dataset.id;
+  const item = findItem(id);
+  if ((!chip && !control) || !item || item.type !== "일정" || !selectedCalendarScheduleMatches(item.id)) return;
 
   const range = selectedDateRange(item.date, item.endDate || item.date);
   state.calendarScheduleResize = {
     pointerId: event.pointerId,
     id: item.id,
     edge: handle.dataset.calendarResizeEdge,
-    element: chip,
+    element: chip || control,
+    fromControl: Boolean(control && !chip),
+    dayWidth: calendarAverageDayWidth(),
     originalStartDate: range.startDate,
     originalEndDate: range.endDate,
     targetStartDate: range.startDate,
     targetEndDate: range.endDate,
     startX: event.clientX,
     startY: event.clientY,
-    row: Number(chip.style.getPropertyValue("--schedule-row")) || 0,
+    row: chip ? Number(chip.style.getPropertyValue("--schedule-row")) || 0 : 0,
     moved: false
   };
+  state.calendarSelectedDate = null;
   try {
     handle.setPointerCapture?.(event.pointerId);
   } catch {
@@ -3538,10 +3818,7 @@ async function finishCalendarScheduleResize(event) {
 
   if (!moved) return;
 
-  state.suppressCalendarScheduleClick = true;
-  window.setTimeout(() => {
-    state.suppressCalendarScheduleClick = false;
-  }, 300);
+  suppressCalendarInteractionAfterScheduleGesture();
 
   const item = findItem(resize.id);
   if (!item) return;
@@ -3560,32 +3837,50 @@ function cancelCalendarScheduleResize() {
 
 function startCalendarScheduleDrag(event) {
   const chip = event.target.closest(".schedule-chip[data-action='select-calendar-schedule']");
+  const controlMove = event.target.closest("[data-calendar-control-action='move']");
+  const control = controlMove?.closest("[data-calendar-schedule-control]");
+  const id = chip?.dataset.id || control?.dataset.id;
   if (
-    !chip ||
+    (!chip && !control) ||
     event.target.closest("[data-calendar-resize-edge]") ||
-    !selectedCalendarScheduleMatches(chip.dataset.id)
+    !selectedCalendarScheduleMatches(id)
   ) return;
 
-  const item = findItem(chip.dataset.id);
+  const item = findItem(id);
   if (!item || item.type !== "일정") return;
 
   const range = selectedDateRange(item.date, item.endDate || item.date);
+  const grabbedDate = chip?.dataset.date || control?.dataset.date || range.startDate;
+  const grabbedDay = chip
+    ? chip.closest(".schedule-calendar [data-date]")
+    : calendarDayElement(grabbedDate);
+  const grabbedRect = grabbedDay?.getBoundingClientRect();
+  const pointerOffsetX = chip && grabbedRect ? event.clientX - grabbedRect.left : (grabbedRect?.width || 0) / 2;
+  const pointerOffsetY = chip && grabbedRect ? event.clientY - grabbedRect.top : (grabbedRect?.height || 0) / 2;
   state.calendarScheduleDrag = {
     pointerId: event.pointerId,
     id: item.id,
-    element: chip,
-    grabbedDate: chip.dataset.date || range.startDate,
+    element: chip || control,
+    grabbedDate,
+    targetGrabbedDate: grabbedDate,
     originalStartDate: range.startDate,
     originalEndDate: range.endDate,
     targetStartDate: range.startDate,
     targetEndDate: range.endDate,
     startX: event.clientX,
     startY: event.clientY,
-    row: Number(chip.style.getPropertyValue("--schedule-row")) || 0,
+    pointerOffsetX,
+    pointerOffsetY,
+    dayWidth: grabbedRect?.width || 0,
+    dayHeight: grabbedRect?.height || 0,
+    visualX: 0,
+    visualY: 0,
+    row: chip ? Number(chip.style.getPropertyValue("--schedule-row")) || 0 : 0,
     moved: false
   };
+  state.calendarSelectedDate = null;
   try {
-    chip.setPointerCapture?.(event.pointerId);
+    (chip || controlMove || control)?.setPointerCapture?.(event.pointerId);
   } catch {
     // Pointer capture can fail when the browser does not consider the pointer active.
   }
@@ -3603,7 +3898,11 @@ function moveCalendarScheduleDrag(event) {
   const wasMoved = drag.moved;
   drag.moved = true;
   const changed = updateCalendarScheduleDragTarget(event);
-  if (!wasMoved || changed) renderCalendarScheduleDragPreview();
+  if (!wasMoved || changed || !document.querySelector(".schedule-drag-preview")) {
+    renderCalendarScheduleDragPreview();
+  } else {
+    scheduleCalendarScheduleDragPreviewTransform();
+  }
   event.preventDefault();
 }
 
@@ -3618,10 +3917,7 @@ async function finishCalendarScheduleDrag(event) {
 
   if (!moved) return;
 
-  state.suppressCalendarScheduleClick = true;
-  window.setTimeout(() => {
-    state.suppressCalendarScheduleClick = false;
-  }, 300);
+  suppressCalendarInteractionAfterScheduleGesture();
 
   const item = findItem(drag.id);
   if (!item) {
@@ -3643,16 +3939,45 @@ function cancelCalendarScheduleDrag() {
 
 function updateCalendarScheduleDragTarget(event) {
   const drag = state.calendarScheduleDrag;
-  const targetDate = calendarDateFromPoint(event);
+  const anchor = calendarScheduleDragAnchorPoint(event, drag);
+  const targetDate = calendarDateFromPoint(anchor) || drag.targetGrabbedDate;
   if (!targetDate) return false;
 
   const previousStartDate = drag.targetStartDate;
   const previousEndDate = drag.targetEndDate;
+  const previousGrabbedDate = drag.targetGrabbedDate;
 
   const delta = daysBetween(drag.grabbedDate, targetDate);
+  drag.targetGrabbedDate = targetDate;
   drag.targetStartDate = addDays(drag.originalStartDate, delta);
   drag.targetEndDate = addDays(drag.originalEndDate, delta);
-  return drag.targetStartDate !== previousStartDate || drag.targetEndDate !== previousEndDate;
+  updateCalendarScheduleDragVisualOffset(event, targetDate);
+  return drag.targetStartDate !== previousStartDate ||
+    drag.targetEndDate !== previousEndDate ||
+    drag.targetGrabbedDate !== previousGrabbedDate;
+}
+
+function calendarScheduleDragAnchorPoint(event, drag) {
+  return {
+    clientX: event.clientX - (drag.pointerOffsetX || 0) + (drag.dayWidth || 0) / 2,
+    clientY: event.clientY - (drag.pointerOffsetY || 0) + (drag.dayHeight || 0) / 2
+  };
+}
+
+function updateCalendarScheduleDragVisualOffset(event, targetDate) {
+  const drag = state.calendarScheduleDrag;
+  if (!drag) return;
+
+  const targetDay = calendarDayElement(targetDate);
+  const rect = targetDay?.getBoundingClientRect();
+  if (!rect) {
+    drag.visualX = 0;
+    drag.visualY = 0;
+    return;
+  }
+
+  drag.visualX = event.clientX - (drag.pointerOffsetX || 0) - rect.left;
+  drag.visualY = event.clientY - (drag.pointerOffsetY || 0) - rect.top;
 }
 
 function clearCalendarScheduleDragDates() {
@@ -3703,6 +4028,31 @@ function renderCalendarScheduleDragPreview() {
     preview.textContent = showTitle ? title : "\u00a0";
     schedules.append(preview);
   });
+  applyCalendarScheduleDragPreviewTransform();
+}
+
+function scheduleCalendarScheduleDragPreviewTransform() {
+  if (state.calendarScheduleDragFrame) return;
+  state.calendarScheduleDragFrame = window.requestAnimationFrame(() => {
+    state.calendarScheduleDragFrame = null;
+    applyCalendarScheduleDragPreviewTransform();
+  });
+}
+
+function applyCalendarScheduleDragPreviewTransform() {
+  const drag = state.calendarScheduleDrag;
+  if (!drag) return;
+
+  const x = `${roundDragPixel(drag.visualX || 0)}px`;
+  const y = `${roundDragPixel(drag.visualY || 0)}px`;
+  document.querySelectorAll(".schedule-drag-preview").forEach((chip) => {
+    chip.style.setProperty("--calendar-drag-x", x);
+    chip.style.setProperty("--calendar-drag-y", y);
+  });
+}
+
+function roundDragPixel(value) {
+  return Math.round(value * 10) / 10;
 }
 
 function clearCalendarScheduleDragPreview(showSource = true) {
@@ -3716,6 +4066,10 @@ function clearCalendarScheduleDragPreview(showSource = true) {
 
 function clearCalendarScheduleDragState(restorePreview = true) {
   if (!state.calendarScheduleDrag) return;
+  if (state.calendarScheduleDragFrame) {
+    window.cancelAnimationFrame(state.calendarScheduleDragFrame);
+    state.calendarScheduleDragFrame = null;
+  }
   const moved = state.calendarScheduleDrag.moved;
   state.calendarScheduleDrag.element.classList.remove("dragging");
   clearCalendarScheduleDragDates();
@@ -3727,10 +4081,11 @@ function startCalendarMonthSwipe(event) {
   if (state.tab !== "calendar") return;
   const grid = event.target.closest(".schedule-calendar");
   const day = event.target.closest(".schedule-calendar [data-date]");
+  const startsOnSelectedDate = Boolean(day && day.dataset.date === state.calendarSelectedDate);
   if (
     !grid ||
-    state.calendarSelectedDate ||
-    event.target.closest(".schedule-chip, [data-calendar-resize-edge]") ||
+    startsOnSelectedDate ||
+    event.target.closest(".calendar-schedule-control, .schedule-chip, [data-calendar-resize-edge]") ||
     state.calendarScheduleDrag ||
     state.calendarScheduleResize
   ) return;
@@ -3761,12 +4116,12 @@ function moveCalendarMonthSwipe(event) {
   const absX = Math.abs(dx);
   const absY = Math.abs(dy);
 
-  if (!swipe.horizontal && absY > 24 && absY > absX) {
+  if (!swipe.horizontal && absY > 32 && absY > absX) {
     swipe.cancelled = true;
     return;
   }
 
-  if (absX > 18 && absX > absY * CALENDAR_MONTH_SWIPE_RATIO) {
+  if (absX > 10 && absX > absY * CALENDAR_MONTH_SWIPE_RATIO) {
     swipe.horizontal = true;
     if (!swipe.captured) {
       try {
@@ -3776,6 +4131,7 @@ function moveCalendarMonthSwipe(event) {
         // Pointer capture can fail when the browser does not consider the pointer active.
       }
     }
+    clearCalendarSelectionForMonthSwipe();
     updateCalendarMonthSwipeVisual(swipe.grid, dx);
     event.preventDefault();
   }
@@ -3801,7 +4157,7 @@ async function finishCalendarMonthSwipe(event) {
 
   suppressCalendarGestureClicks();
   commitCalendarMonthSwipeVisual(swipe.grid, dx);
-  await wait(130);
+  await wait(110);
   await changeCalendarMonth(dx > 0 ? -1 : 1);
 }
 
@@ -3812,10 +4168,22 @@ function cancelCalendarMonthSwipe() {
 
 function updateCalendarMonthSwipeVisual(grid, dx) {
   if (!grid) return;
-  const visualX = Math.max(-CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, Math.min(CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, dx * 0.42));
+  const visualX = Math.max(-CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, Math.min(CALENDAR_MONTH_SWIPE_VISUAL_LIMIT, dx * 0.56));
   grid.classList.add("month-swiping");
   grid.classList.remove("month-swipe-commit");
-  grid.style.setProperty("--calendar-swipe-x", `${Math.round(visualX)}px`);
+  grid.style.setProperty("--calendar-swipe-x", `${roundDragPixel(visualX)}px`);
+}
+
+function clearCalendarSelectionForMonthSwipe() {
+  if (!state.calendarSelectedDate && !state.selectedCalendarSchedule) return;
+  state.calendarSelectedDate = null;
+  state.selectedCalendarSchedule = null;
+  document.querySelectorAll(".schedule-calendar .day-cell.selected").forEach((day) => {
+    day.classList.remove("selected");
+  });
+  document.querySelectorAll(".schedule-calendar .schedule-chip.selected").forEach((chip) => {
+    chip.classList.remove("selected");
+  });
 }
 
 function resetCalendarMonthSwipeVisual(grid, immediate = false) {
@@ -3950,7 +4318,9 @@ function calendarZoomGestureDistance(gesture) {
 
 function updateCalendarScheduleResizeTarget(event) {
   const resize = state.calendarScheduleResize;
-  const targetDate = calendarDateFromPoint(event);
+  const targetDate = resize.fromControl
+    ? calendarResizeControlTargetDate(event, resize)
+    : calendarDateFromPoint(event);
   if (!targetDate) return false;
 
   const previousStartDate = resize.targetStartDate;
@@ -3967,10 +4337,38 @@ function updateCalendarScheduleResizeTarget(event) {
   return resize.targetStartDate !== previousStartDate || resize.targetEndDate !== previousEndDate;
 }
 
+function calendarResizeControlTargetDate(event, resize) {
+  const dayWidth = resize.dayWidth || calendarAverageDayWidth();
+  if (!dayWidth) return "";
+
+  const deltaDays = Math.round((event.clientX - resize.startX) / dayWidth);
+  return resize.edge === "start"
+    ? addDays(resize.originalStartDate, deltaDays)
+    : addDays(resize.originalEndDate, deltaDays);
+}
+
+function calendarAverageDayWidth() {
+  const day = document.querySelector(".schedule-calendar [data-date]");
+  const rect = day?.getBoundingClientRect();
+  if (!rect?.width) return 0;
+  const gap = Number.parseFloat(getComputedStyle(document.querySelector(".schedule-calendar")).getPropertyValue("--calendar-gap")) || 0;
+  return rect.width + gap;
+}
+
 function calendarDateFromPoint(event) {
-  return document.elementFromPoint(event.clientX, event.clientY)
-    ?.closest(".schedule-calendar [data-date]")
-    ?.dataset.date;
+  const elements = document.elementsFromPoint
+    ? document.elementsFromPoint(event.clientX, event.clientY)
+    : [document.elementFromPoint(event.clientX, event.clientY)];
+  for (const element of elements) {
+    const day = element?.closest?.(".schedule-calendar [data-date]");
+    if (day?.dataset.date) return day.dataset.date;
+  }
+  return "";
+}
+
+function calendarDayElement(date) {
+  if (!date) return null;
+  return document.querySelector(`.schedule-calendar [data-date="${date}"]`);
 }
 
 function clearCalendarScheduleResizeDates() {
@@ -4069,7 +4467,7 @@ function startCalendarSelection(event) {
   if (
     !day ||
     day.dataset.date !== state.calendarSelectedDate ||
-    event.target.closest(".schedule-chip, [data-calendar-resize-edge], button:not(.day-cell), input, textarea, select") ||
+    event.target.closest(".calendar-schedule-control, .schedule-chip, [data-calendar-resize-edge], button:not(.day-cell), input, textarea, select") ||
     state.calendarScheduleDrag ||
     state.calendarScheduleResize ||
     state.calendarMonthSwipe
@@ -4234,7 +4632,7 @@ function clearTimelineItemOnScroll() {
 function clearCalendarDateOnOutsidePointer(event) {
   if (
     state.tab !== "calendar" ||
-    !state.calendarSelectedDate ||
+    (!state.calendarSelectedDate && !state.selectedCalendarSchedule) ||
     els.dialog.open ||
     els.calendarTimelineDialog.open ||
     state.calendarSelection ||
@@ -4242,6 +4640,7 @@ function clearCalendarDateOnOutsidePointer(event) {
     state.calendarScheduleResize
   ) return;
   if (event.target?.closest?.(".schedule-calendar [data-date]")) return;
+  if (event.target?.closest?.(".calendar-schedule-control")) return;
 
   state.calendarSelectedDate = null;
   state.selectedCalendarSchedule = null;
@@ -4299,7 +4698,7 @@ function clearSelectedTimeRangeOnly() {
 }
 
 function canSelectTimelineItem(item) {
-  return Boolean(item && (item.type === "일정" || item.type === "할일" || item.type === "루틴"));
+  return Boolean(item && isTimedItemType(item.type));
 }
 
 async function deleteTimelineItem(id) {
@@ -4715,6 +5114,26 @@ function activeRoutines(date) {
   return state.items.filter((item) => item.type === "루틴" && isRoutineActive(item, date));
 }
 
+function activeFixedSchedules(date) {
+  return state.items.filter((item) =>
+    item.type === "고정일정" &&
+    isRoutineActive(item, date) &&
+    !fixedScheduleSkipped(item.id, date)
+  );
+}
+
+function isRecurringTemplateType(type) {
+  return type === "루틴" || type === "고정일정";
+}
+
+function isTimedItemType(type) {
+  return type === "일정" || type === "할일" || isRecurringTemplateType(type);
+}
+
+function isFixedScheduleType(type) {
+  return type === "고정일정";
+}
+
 function isRoutineActive(routine, date) {
   if (!routine.repeatDays || routine.repeatDays.length === 0) return true;
   return routine.repeatDays.includes(ROUTINE_DAYS[new Date(`${date}T00:00:00`).getDay()]);
@@ -4722,6 +5141,10 @@ function isRoutineActive(routine, date) {
 
 function routineRecord(routineId, date) {
   return state.items.find((item) => item.type === "루틴기록" && item.sourceRoutineId === routineId && item.date === date);
+}
+
+function fixedScheduleSkipped(scheduleId, date) {
+  return routineRecord(scheduleId, date)?.status === "취소";
 }
 
 function emotionRecord(date) {
@@ -4884,6 +5307,11 @@ function humanDate(date) {
 
 function displayType(type) {
   return TYPE_LABELS[type] || type || "";
+}
+
+function normalizeItemType(type) {
+  const normalized = String(type || "").trim();
+  return TYPE_VALUE_ALIASES[normalized] || normalized;
 }
 
 function displayEmotion(emotion) {
