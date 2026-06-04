@@ -81,6 +81,9 @@ const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
 const AUTH_UNLOCK_ANIMATION_MS = 500;
 const AUTH_MOOD_STORAGE_KEY = "sephia-chord.authMood";
 const AUTH_PHRASE_STORAGE_KEY = "sephia-chord.authPhrase";
+const ITEM_CACHE_STORAGE_KEY = "sephia-chord.itemsCache.v1";
+const ITEM_CACHE_MAX_RANGES = 6;
+const ITEM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_PHRASES = [
   { id: "chord", text: "Keep your chord" },
   { id: "rhythm", text: "Move in your rhythm" },
@@ -457,6 +460,10 @@ function bindEvents() {
     if (action.dataset.action === "skip-fixed-schedule") {
       event.stopPropagation();
       await skipFixedSchedule(id, action.dataset.date || state.selectedDate);
+    }
+    if (action.dataset.action === "return-fixed-schedule") {
+      event.stopPropagation();
+      await returnFixedSchedule(id);
     }
     if (action.dataset.action === "set-emotion") {
       event.stopPropagation();
@@ -888,23 +895,82 @@ function handlePinKeydown(event) {
 }
 
 async function loadItems() {
-  setStatus("Loading...");
+  const range = queryRange();
+  const cacheUsed = hydrateItemsFromCache(range);
+  setStatus(cacheUsed ? "Syncing..." : "Loading...");
   state.loading = true;
-  const { start, end } = queryRange();
+  const { start, end } = range;
 
   try {
     const payload = await api(`/api/items?start=${start}&end=${end}`);
-    state.items = (payload.items || []).map(applyRememberedItemTime);
-    state.items.forEach(rememberItemTime);
+    setItems(payload.items || []);
+    writeItemsCache(range, state.items);
     setStatus("");
-    render();
   } catch (error) {
-    state.items = [];
-    render();
+    if (!cacheUsed) {
+      state.items = [];
+      render();
+    }
     setStatus(error.message || "Could not load Notion data.");
   } finally {
     state.loading = false;
   }
+}
+
+function setItems(items, options = {}) {
+  state.items = (items || []).map(applyRememberedItemTime);
+  state.items.forEach(rememberItemTime);
+  if (options.renderAfter !== false) render();
+}
+
+function hydrateItemsFromCache(range = queryRange()) {
+  const entry = readItemsCache(range);
+  if (!entry) return false;
+  setItems(entry.items || []);
+  return true;
+}
+
+function readItemsCache(range = queryRange()) {
+  try {
+    const cache = JSON.parse(window.localStorage.getItem(ITEM_CACHE_STORAGE_KEY) || "{}");
+    const entry = cache.ranges?.[itemsCacheRangeKey(range)];
+    if (!entry || !Array.isArray(entry.items)) return null;
+    if (Date.now() - Number(entry.savedAt || 0) > ITEM_CACHE_MAX_AGE_MS) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveItemsCache() {
+  writeItemsCache(queryRange(), state.items);
+}
+
+function writeItemsCache(range = queryRange(), items = state.items) {
+  try {
+    const cache = JSON.parse(window.localStorage.getItem(ITEM_CACHE_STORAGE_KEY) || "{}");
+    const ranges = cache.ranges && typeof cache.ranges === "object" ? cache.ranges : {};
+    const key = itemsCacheRangeKey(range);
+    ranges[key] = {
+      savedAt: Date.now(),
+      items
+    };
+
+    Object.entries(ranges)
+      .sort((left, right) => Number(right[1]?.savedAt || 0) - Number(left[1]?.savedAt || 0))
+      .slice(ITEM_CACHE_MAX_RANGES)
+      .forEach(([staleKey]) => {
+        delete ranges[staleKey];
+      });
+
+    window.localStorage.setItem(ITEM_CACHE_STORAGE_KEY, JSON.stringify({ ranges }));
+  } catch {
+    // Cache writes are best-effort; Notion remains the source of truth.
+  }
+}
+
+function itemsCacheRangeKey(range = queryRange()) {
+  return `${range.start}|${range.end}`;
 }
 
 function render() {
@@ -915,6 +981,37 @@ function render() {
   renderCalendarTimelineDialog();
   renderEmotionTab();
   renderRoutines();
+}
+
+function renderActiveView() {
+  els.selectedDateLabel.textContent = humanDate(topbarDisplayDate());
+  renderTabs();
+
+  if (state.tab === "today") {
+    renderToday();
+    return;
+  }
+  if (state.tab === "calendar") {
+    renderCalendar();
+    renderCalendarTimelineDialog();
+    return;
+  }
+  if (state.tab === "emotion") {
+    renderEmotionTab();
+    return;
+  }
+  if (state.tab === "routines") {
+    renderRoutines();
+  }
+}
+
+function renderLocalChange(options = {}) {
+  if (options.renderAfter === false) return;
+  if (options.fullRender) {
+    render();
+    return;
+  }
+  renderActiveView();
 }
 
 function topbarDisplayDate() {
@@ -1665,25 +1762,23 @@ async function awardChallengeFill() {
   state.challengeSaving = true;
 
   try {
-    await api("/api/items", {
-      method: "POST",
-      body: {
-        title: `Challenge Level ${active.index + 1} Layer ${layer + 1}`,
-        type: "감정",
-        date: todayString(),
-        completed: true,
-        status: "완료",
-        note: JSON.stringify({
-          kind: "challenge",
-          levelId: active.level.id,
-          layer,
-          color
-        })
-      }
-    });
+    await createItemFast({
+      title: `Challenge Level ${active.index + 1} Layer ${layer + 1}`,
+      type: "감정",
+      date: todayString(),
+      completed: true,
+      status: "완료",
+      note: JSON.stringify({
+        kind: "challenge",
+        levelId: active.level.id,
+        layer,
+        color
+      })
+    }, { renderAfter: false });
 
     state.selectedChallengeLayer = null;
     state.challengeAnalysis = null;
+    render();
     return cleared ? "Level cleared. Moving to the next level." : "Challenge progress saved.";
   } catch (error) {
     return error.message || "Could not save challenge progress.";
@@ -2194,6 +2289,7 @@ function renderEmotionCalendarDay(day) {
 
 function renderRoutines() {
   const routines = state.items.filter((item) => item.type === "루틴").sort(byTitle);
+  const skippedFixed = skippedFixedSchedules();
 
   els.routinesTab.innerHTML = `
     <section class="section">
@@ -2201,6 +2297,7 @@ function renderRoutines() {
         <h2>Routine</h2>
       </div>
       ${renderRoutineList(routines, true)}
+      ${renderSkippedFixedSchedules(skippedFixed)}
     </section>
   `;
 }
@@ -2252,6 +2349,38 @@ function renderRoutineList(routines, showAll) {
       }).join("")}
     </div>
   `;
+}
+
+function renderSkippedFixedSchedules(entries) {
+  if (!entries.length) return "";
+
+  return `
+    <div class="skipped-fixed-panel">
+      <div class="skipped-fixed-header">
+        <h3>Skipped Fixed</h3>
+      </div>
+      <div class="skipped-fixed-list">
+        ${entries.map(({ record, schedule }) => `
+          <div class="item skipped-fixed-card">
+            <span class="tag">Fixed</span>
+            <div class="item-main">
+              <span class="item-title">${escapeHtml(schedule.title || record.title || "Untitled")}</span>
+              <span class="item-meta">${escapeHtml(skippedFixedMeta(record, schedule))}</span>
+            </div>
+            <button type="button" class="return-button" data-action="return-fixed-schedule" data-id="${record.id}">Return</button>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function skippedFixedMeta(record, schedule) {
+  const parts = [
+    record.date ? humanDate(record.date) : "",
+    routineTimeLabel(schedule)
+  ];
+  return parts.filter(Boolean).join(" · ");
 }
 
 function renderEmotionCheck(emotion) {
@@ -3065,20 +3194,22 @@ async function saveItem(event) {
   let saved = false;
 
   try {
+    let responsePayload;
     if (id) {
-      await api("/api/items", {
+      responsePayload = await api("/api/items", {
         method: "PATCH",
         body: { id, ...payload }
       });
     } else {
-      await api("/api/items", {
+      responsePayload = await api("/api/items", {
         method: "POST",
         body: payload
       });
     }
+    if (responsePayload.item) upsertLocalItem(responsePayload.item, { renderAfter: false });
     saved = true;
     els.dialog.close();
-    await loadItems();
+    render();
   } catch (error) {
     setStatus(error.message || "Could not save.");
   } finally {
@@ -3096,10 +3227,10 @@ async function deleteCurrentItem() {
   let deleted = false;
 
   try {
-    await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await deleteItemFast(id, { renderAfter: false });
     deleted = true;
     els.dialog.close();
-    await loadItems();
+    render();
   } catch (error) {
     setStatus(error.message || "Could not delete.");
   } finally {
@@ -3123,11 +3254,11 @@ async function toggleTask(id) {
   if (item.startTime) body.startTime = item.startTime;
   if (item.endTime) body.endTime = item.endTime;
 
-  await api("/api/items", {
-    method: "PATCH",
-    body
-  });
-  await loadItems();
+  try {
+    await patchItemFast(id, body);
+  } catch (error) {
+    setStatus(error.message || "Could not update.");
+  }
 }
 
 function rememberItemTime(item) {
@@ -3151,38 +3282,114 @@ function applyRememberedItemTime(item) {
   };
 }
 
+function upsertLocalItem(item, options = {}) {
+  if (!item || !item.id) return null;
+  const normalized = applyRememberedItemTime(item);
+  const index = state.items.findIndex((entry) => entry.id === normalized.id);
+  if (index >= 0) {
+    state.items = [
+      ...state.items.slice(0, index),
+      normalized,
+      ...state.items.slice(index + 1)
+    ];
+  } else {
+    state.items = [...state.items, normalized];
+  }
+  rememberItemTime(normalized);
+  writeActiveItemsCache();
+  renderLocalChange(options);
+  return normalized;
+}
+
+function removeLocalItem(id, options = {}) {
+  if (!id) return null;
+  const previous = findItem(id);
+  if (!previous) return null;
+  state.items = state.items.filter((item) => item.id !== id);
+  delete state.itemTimeMemory[id];
+  writeActiveItemsCache();
+  renderLocalChange(options);
+  return previous;
+}
+
+function localPatchedItem(item, patch) {
+  if (!item) return null;
+  return applyRememberedItemTime({
+    ...item,
+    ...patch,
+    lastEditedTime: new Date().toISOString()
+  });
+}
+
+async function patchItemFast(id, patch, apiBody = patch, options = {}) {
+  const previous = findItem(id);
+  if (!previous) return null;
+  const optimistic = localPatchedItem(previous, patch);
+  upsertLocalItem(optimistic, { renderAfter: options.renderAfter !== false });
+
+  try {
+    const payload = await api("/api/items", {
+      method: "PATCH",
+      body: { id, ...apiBody }
+    });
+    if (payload.item) return upsertLocalItem(payload.item, { renderAfter: options.renderAfter !== false });
+    return optimistic;
+  } catch (error) {
+    upsertLocalItem(previous, { renderAfter: options.renderAfter !== false });
+    throw error;
+  }
+}
+
+async function createItemFast(body, options = {}) {
+  const payload = await api("/api/items", {
+    method: "POST",
+    body
+  });
+  if (payload.item) upsertLocalItem(payload.item, { renderAfter: options.renderAfter !== false });
+  return payload;
+}
+
+async function deleteItemFast(id, options = {}) {
+  const previous = removeLocalItem(id, { renderAfter: options.renderAfter !== false });
+  if (!previous) return null;
+
+  try {
+    await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    return previous;
+  } catch (error) {
+    upsertLocalItem(previous, { renderAfter: options.renderAfter !== false });
+    throw error;
+  }
+}
+
 async function toggleRoutine(id) {
   const routine = findItem(id);
   if (!routine) return;
   const existing = routineRecord(id, state.selectedDate);
   const completed = !(existing && existing.completed);
 
-  if (existing) {
-    await api("/api/items", {
-      method: "PATCH",
-      body: {
-        id: existing.id,
+  try {
+    if (existing) {
+      await patchItemFast(existing.id, {
         completed,
         status: completed ? "완료" : "예정"
-      }
-    });
-  } else {
-    await api("/api/items", {
-      method: "POST",
-      body: {
+      });
+    } else {
+      await createItemFast({
         title: `${routine.title} log`,
         type: "루틴기록",
         date: state.selectedDate,
         completed,
         status: completed ? "완료" : "예정",
         sourceRoutineId: routine.id
-      }
-    });
-  }
+      });
+    }
 
-  const challengeMessage = completed ? await awardChallengeFill() : "";
-  await loadItems();
-  if (challengeMessage) setStatus(challengeMessage);
+    const challengeMessage = completed ? await awardChallengeFill() : "";
+    if (challengeMessage) setStatus(challengeMessage);
+  } catch (error) {
+    setStatus(error.message || "Could not update the routine.");
+  }
 }
 
 async function skipFixedSchedule(id, date = state.selectedDate) {
@@ -3190,32 +3397,40 @@ async function skipFixedSchedule(id, date = state.selectedDate) {
   if (!schedule || schedule.type !== "고정일정" || !isDateString(date)) return;
 
   const existing = routineRecord(id, date);
-  if (existing) {
-    await api("/api/items", {
-      method: "PATCH",
-      body: {
-        id: existing.id,
+  state.selectedTimelineItem = null;
+  clearSelectedTimelineRange();
+
+  try {
+    if (existing) {
+      await patchItemFast(existing.id, {
         completed: false,
         status: "취소"
-      }
-    });
-  } else {
-    await api("/api/items", {
-      method: "POST",
-      body: {
+      });
+    } else {
+      await createItemFast({
         title: `${schedule.title} skip`,
         type: "루틴기록",
         date,
         completed: false,
         status: "취소",
         sourceRoutineId: schedule.id
-      }
-    });
+      });
+    }
+  } catch (error) {
+    setStatus(error.message || "Could not skip the fixed schedule.");
   }
+}
 
-  state.selectedTimelineItem = null;
-  clearSelectedTimelineRange();
-  await loadItems();
+async function returnFixedSchedule(recordId) {
+  const record = findItem(recordId);
+  if (!record || record.type !== "루틴기록" || record.status !== "취소") return;
+
+  try {
+    await deleteItemFast(record.id);
+    setStatus("Returned.");
+  } catch (error) {
+    setStatus(error.message || "Could not return the fixed schedule.");
+  }
 }
 
 function startTimeSelection(event) {
@@ -3578,11 +3793,7 @@ async function updateTimelineItemTime(item, startTime, endTime) {
     endTime
   });
 
-  await api("/api/items", {
-    method: "PATCH",
-    body
-  });
-  await loadItems();
+  await patchItemFast(item.id, body);
 }
 
 function timelineDragTargetIndex(event) {
@@ -3738,12 +3949,10 @@ async function deleteCalendarSchedule(id) {
   clearSelectedTimelineRange();
 
   try {
-    await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await deleteItemFast(id);
     setStatus("Deleted.");
-    await loadItems();
   } catch (error) {
     setStatus(error.message || "Could not delete.");
-    render();
   }
 }
 
@@ -4454,11 +4663,7 @@ async function updateCalendarScheduleRange(item, startDate, endDate) {
   state.selectedDate = range.startDate;
   state.selectedCalendarSchedule = { id: item.id };
   state.calendarSelectedDate = null;
-  await api("/api/items", {
-    method: "PATCH",
-    body
-  });
-  await loadItems();
+  await patchItemFast(item.id, body);
 }
 
 function startCalendarSelection(event) {
@@ -4708,12 +4913,10 @@ async function deleteTimelineItem(id) {
   clearSelectedTimelineRange();
 
   try {
-    await api(`/api/items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await deleteItemFast(id);
     setStatus("Deleted.");
-    await loadItems();
   } catch (error) {
     setStatus(error.message || "Could not delete.");
-    render();
   }
 }
 
@@ -4895,15 +5098,8 @@ async function saveEmotion(nextEmotion) {
   if (!emotion) {
     if (existing) {
       try {
-        await api("/api/items", {
-          method: "PATCH",
-          body: {
-            id: existing.id,
-            note: comment
-          }
-        });
+        await patchItemFast(existing.id, { note: comment });
         setStatus("Comment saved.");
-        await loadItems();
       } catch (error) {
         setStatus(error.message || "Could not save the comment.");
       }
@@ -4926,12 +5122,8 @@ async function saveEmotion(nextEmotion) {
 
   state.emotionSaving = true;
   try {
-    await api("/api/items", {
-      method: "POST",
-      body: payload
-    });
+    await createItemFast(payload);
     setStatus("Emotion check saved.");
-    await loadItems();
     if (els.emotionDialog.open && !nextEmotion) {
       els.emotionDialog.close();
     }
@@ -4985,9 +5177,8 @@ async function removeEmotion(date) {
 
   try {
     if (els.emotionDialog.open) els.emotionDialog.close();
-    await api(`/api/items?id=${encodeURIComponent(existing.id)}`, { method: "DELETE" });
+    await deleteItemFast(existing.id);
     setStatus("Emotion record removed.");
-    await loadItems();
   } catch (error) {
     setStatus(error.message || "Could not remove the emotion record.");
   }
@@ -5145,6 +5336,21 @@ function routineRecord(routineId, date) {
 
 function fixedScheduleSkipped(scheduleId, date) {
   return routineRecord(scheduleId, date)?.status === "취소";
+}
+
+function skippedFixedSchedules() {
+  return state.items
+    .filter((item) => item.type === "루틴기록" && item.status === "취소" && item.sourceRoutineId)
+    .map((record) => ({
+      record,
+      schedule: findItem(record.sourceRoutineId)
+    }))
+    .filter(({ schedule }) => schedule && schedule.type === "고정일정")
+    .sort((left, right) =>
+      String(right.record.date || "").localeCompare(String(left.record.date || "")) ||
+      byStartTime(left.schedule, right.schedule) ||
+      byTitle(left.schedule, right.schedule)
+    );
 }
 
 function emotionRecord(date) {

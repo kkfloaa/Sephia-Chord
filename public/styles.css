@@ -1066,6 +1066,17 @@ body.fixed-tab #emotionTab .section {
   color: var(--muted);
 }
 
+.return-button {
+  min-width: 72px;
+  min-height: 32px;
+  border-color: rgb(241 216 189 / 28%);
+  background: rgb(60 36 22 / 72%);
+  color: #f1d8bd;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
 .item-title {
   display: block;
   overflow: hidden;
@@ -1112,6 +1123,39 @@ body.fixed-tab #emotionTab .section {
   font-size: 11px;
   line-height: 1;
   padding: 3px 8px;
+}
+
+.skipped-fixed-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid rgb(241 216 189 / 12%);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.skipped-fixed-header h3 {
+  margin: 0;
+  color: #f1d8bd;
+  font-size: 15px;
+}
+
+.skipped-fixed-list {
+  display: grid;
+  gap: 8px;
+}
+
+.skipped-fixed-card {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  border-color: rgb(245 178 149 / 32%);
+  background:
+    linear-gradient(180deg, rgb(40 26 18 / 92%), rgb(23 17 13 / 96%)),
+    radial-gradient(circle at 10% 0%, rgb(196 123 60 / 12%), transparent 48%);
+}
+
+.skipped-fixed-card .tag {
+  border-color: rgb(244 151 143 / 42%);
+  background: rgb(58 31 28 / 66%);
+  color: #ffe2dd;
 }
 
 .emotion-panel {
@@ -1473,9 +1517,12 @@ body.fixed-tab #calendarTab .schedule-calendar {
 
 .schedule-calendar .day-cell,
 .emotion-calendar .day-cell {
+  --day-cell-pad-y: 6px;
+  --day-number-size: 20px;
+  --day-head-height: var(--day-number-size);
   position: relative;
   align-content: start;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: var(--day-head-height) 1fr;
   height: var(--calendar-day-height);
   justify-items: stretch;
   min-height: 0;
@@ -1523,13 +1570,13 @@ body.fixed-tab #calendarTab .schedule-calendar {
 .day-number {
   display: inline-grid;
   width: fit-content;
-  min-width: 20px;
-  min-height: 20px;
+  min-width: var(--day-number-size);
+  height: var(--day-number-size);
   place-items: center;
   justify-self: start;
   color: inherit;
   font-size: 11px;
-  line-height: 20px;
+  line-height: 1;
   padding: 0 5px;
 }
 
@@ -1553,15 +1600,16 @@ body.fixed-tab #calendarTab .schedule-calendar {
 .day-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  height: var(--day-head-height, var(--day-number-size, 20px));
   min-width: 0;
-  align-content: start;
+  align-content: center;
   gap: 2px;
-  min-height: 12px;
+  min-height: var(--day-head-height, var(--day-number-size, 20px));
 }
 
 .holiday-label {
   position: absolute;
-  top: 16px;
+  top: calc(var(--day-cell-pad-y, 6px) + var(--day-number-size, 20px) / 2);
   right: 5px;
   z-index: 2;
   display: inline-flex;
@@ -2937,6 +2985,8 @@ dialog::backdrop {
 
   .schedule-calendar .day-cell,
   .emotion-calendar .day-cell {
+    --day-cell-pad-y: 5px;
+    --day-number-size: 21px;
     height: var(--calendar-day-height);
     min-height: 0;
     padding: 5px 4px;
@@ -2944,19 +2994,14 @@ dialog::backdrop {
 
   .day-head {
     gap: 2px;
-    min-height: 12px;
   }
 
   .day-number {
     font-size: 12px;
-    line-height: 21px;
-    min-width: 21px;
-    min-height: 21px;
     padding: 0 5px;
   }
 
   .holiday-label {
-    top: 15.5px;
     right: 4px;
     height: 11px;
     max-width: calc(100% - 20px);
