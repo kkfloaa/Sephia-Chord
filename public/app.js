@@ -29,6 +29,7 @@ const state = {
   reminderTimer: null,
   reminderServiceWorkerReady: null,
   remoteReminderSyncing: false,
+  reminderResumeTimer: null,
   calendarZoom: 1.48,
   calendarZoomGesture: null,
   calendarZoomPulse: false,
@@ -54,6 +55,9 @@ const state = {
   emotionSaving: false,
   challengeSaving: false,
   skipCleanupInFlight: false,
+  lastActivityAt: 0,
+  lastActivityWriteAt: 0,
+  sessionLogoutTimer: null,
   pinSubmitting: false
 };
 
@@ -86,6 +90,8 @@ const TIMELINE_TOUCH_MOVE_CANCEL_DISTANCE = 10;
 const AUTH_UNLOCK_ANIMATION_MS = 500;
 const AUTH_MOOD_STORAGE_KEY = "sephia-chord.authMood";
 const AUTH_PHRASE_STORAGE_KEY = "sephia-chord.authPhrase";
+const QUICK_MEMO_STORAGE_KEY = "sephia-chord.quickMemo";
+const SESSION_ACTIVITY_STORAGE_KEY = "sephia-chord.sessionLastActivity";
 const ITEM_CACHE_STORAGE_KEY = "sephia-chord.itemsCache.v1";
 const ITEM_CACHE_MAX_RANGES = 6;
 const ITEM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -95,6 +101,9 @@ const REMINDER_SENT_STORAGE_KEY = "sephia-chord.reminders.sent.v1";
 const REMINDER_LEAD_MINUTES = 30;
 const REMINDER_POLL_MS = 30 * 1000;
 const REMINDER_WINDOW_MS = 75 * 1000;
+const REMINDER_LATE_GRACE_MS = 30 * 60 * 1000;
+const SESSION_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const SESSION_ACTIVITY_WRITE_MIN_MS = 1000;
 const AUTH_PHRASES = [
   { id: "chord", text: "Keep your chord" },
   { id: "rhythm", text: "Move in your rhythm" },
@@ -259,6 +268,7 @@ const els = {
   authMessage: document.querySelector("#authMessage"),
   authPhraseContent: document.querySelector("#authPhraseContent"),
   authPhraseDialog: document.querySelector("#authPhraseDialog"),
+  authQuickMemo: document.querySelector("#authQuickMemo"),
   authUnlockLogo: document.querySelector(".auth-unlock-logo"),
   authView: document.querySelector("#authView"),
   calendarTimelineContent: document.querySelector("#calendarTimelineContent"),
@@ -270,6 +280,7 @@ const els = {
   closeDialogButton: document.querySelector("#closeDialogButton"),
   closeEmotionDialogButton: document.querySelector("#closeEmotionDialogButton"),
   closeLogoutMoodDialogButton: document.querySelector("#closeLogoutMoodDialogButton"),
+  closeQuickMemoDialogButton: document.querySelector("#closeQuickMemoDialogButton"),
   dateFields: document.querySelector("#dateFields"),
   dateInput: document.querySelector("#dateInput"),
   deleteButton: document.querySelector("#deleteButton"),
@@ -293,6 +304,9 @@ const els = {
   passwordInput: document.querySelector("#passwordInput"),
   phraseButton: document.querySelector("#phraseButton"),
   pickerPanel: document.querySelector("#pickerPanel"),
+  quickMemoButton: document.querySelector("#quickMemoButton"),
+  quickMemoDialog: document.querySelector("#quickMemoDialog"),
+  quickMemoInput: document.querySelector("#quickMemoInput"),
   routinesTab: document.querySelector("#routinesTab"),
   routineFields: document.querySelector("#routineFields"),
   scheduleFields: document.querySelector("#scheduleFields"),
@@ -313,6 +327,7 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   applyStoredAuthMood();
   applyStoredAuthPhrase();
+  applyStoredQuickMemo();
   bindEvents();
   registerReminderServiceWorker();
   updateReminderButton();
@@ -331,6 +346,7 @@ function bindEvents() {
   document.querySelector("#refreshButton").addEventListener("click", loadItems);
   els.notificationButton.addEventListener("click", toggleReminderAlerts);
   els.phraseButton.addEventListener("click", openAuthPhraseDialog);
+  els.quickMemoButton.addEventListener("click", openQuickMemoDialog);
   els.closeCalendarTimelineDialogButton.addEventListener("click", () => els.calendarTimelineDialog.close());
   els.closeDialogButton.addEventListener("click", cancelItemDialog);
   els.itemDialogBackdrop.addEventListener("pointerdown", handleItemDialogBackdropPress);
@@ -338,6 +354,7 @@ function bindEvents() {
   els.closeEmotionDialogButton.addEventListener("click", () => els.emotionDialog.close());
   els.closeLogoutMoodDialogButton.addEventListener("click", () => els.logoutMoodDialog.close());
   els.closeAuthPhraseDialogButton.addEventListener("click", () => els.authPhraseDialog.close());
+  els.closeQuickMemoDialogButton.addEventListener("click", () => els.quickMemoDialog.close());
   els.dialog.addEventListener("pointerdown", closeItemDialogOnOutsidePointer);
   els.dialog.addEventListener("click", closeItemDialogOnOutsidePointer);
   els.dialog.addEventListener("close", handleItemDialogClose);
@@ -498,6 +515,14 @@ function bindEvents() {
       event.stopPropagation();
       chooseAuthPhrase(action.dataset.phraseId);
     }
+    if (action.dataset.action === "save-quick-memo") {
+      event.stopPropagation();
+      saveQuickMemo();
+    }
+    if (action.dataset.action === "clear-quick-memo") {
+      event.stopPropagation();
+      clearQuickMemo();
+    }
     if (action.dataset.action === "open-challenge-gallery") {
       event.stopPropagation();
       openChallengeGallery();
@@ -636,10 +661,13 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarSelection);
   document.body.addEventListener("pointerup", finishCalendarSelection);
   document.body.addEventListener("pointercancel", cancelCalendarSelection);
-  window.addEventListener("pagehide", lockAppForNextEntry);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") lockAppForNextEntry();
-  });
+  document.addEventListener("pointerdown", recordSessionActivity, true);
+  document.addEventListener("keydown", recordSessionActivity, true);
+  document.addEventListener("scroll", recordSessionActivity, true);
+  window.addEventListener("pagehide", persistSessionActivity);
+  document.addEventListener("visibilitychange", handleSessionVisibilityChange);
+  window.addEventListener("focus", handleWindowFocus);
+  window.addEventListener("pageshow", handleWindowFocus);
   window.addEventListener("resize", handleViewportResize);
 }
 
@@ -692,12 +720,38 @@ async function checkAuth() {
   state.authenticated = Boolean(response.authenticated);
   els.authView.hidden = state.authenticated;
   els.appView.hidden = !state.authenticated;
-  if (state.authenticated) await loadItems();
+  if (state.authenticated) {
+    startSessionActivityWindow(storedSessionActivity() || Date.now());
+    await loadItems();
+  }
 }
 
 async function requireLoginOnEntry() {
   lockAppView();
-  await clearAuthSession();
+  const lastActivity = storedSessionActivity();
+  if (!lastActivity || sessionIdleExpired(lastActivity)) {
+    clearStoredSessionActivity();
+    await clearAuthSession();
+    return;
+  }
+
+  try {
+    const response = await api("/api/auth");
+    if (!response.authenticated) {
+      clearStoredSessionActivity();
+      return;
+    }
+
+    state.authenticated = true;
+    resetStateForLoginEntry();
+    startSessionActivityWindow(lastActivity);
+    els.authView.hidden = true;
+    els.appView.hidden = false;
+    await loadItems();
+  } catch {
+    clearStoredSessionActivity();
+    await clearAuthSession();
+  }
 }
 
 async function login(event) {
@@ -732,6 +786,7 @@ async function logout() {
 }
 
 async function completeLogout() {
+  clearStoredSessionActivity();
   await clearAuthSession();
   lockAppView();
 }
@@ -782,6 +837,7 @@ async function chooseLogoutMood(emotion) {
 async function unlockAppAfterLogin() {
   state.authenticated = true;
   resetStateForLoginEntry();
+  startSessionActivityWindow();
   els.appView.hidden = false;
   const loadPromise = loadItems();
   await playAuthUnlockAnimation();
@@ -814,16 +870,12 @@ function playAuthUnlockAnimation() {
   });
 }
 
-function lockAppForNextEntry() {
-  if (!state.authenticated) return;
-  lockAppView();
-  clearAuthSession({ keepalive: true });
-}
-
 function lockAppView() {
   state.authenticated = false;
+  stopSessionLogoutTimer();
   applyStoredAuthMood();
   applyStoredAuthPhrase();
+  applyStoredQuickMemo();
   document.documentElement.classList.remove("fixed-tab");
   document.body.classList.remove("fixed-tab");
   document.body.removeAttribute("data-active-tab");
@@ -839,6 +891,98 @@ function lockAppView() {
   if (els.logoutMoodDialog.open) els.logoutMoodDialog.close();
   els.authView.hidden = false;
   els.appView.hidden = true;
+}
+
+function startSessionActivityWindow(activityAt = Date.now()) {
+  state.lastActivityAt = Number(activityAt || Date.now());
+  state.lastActivityWriteAt = Date.now();
+  storeSessionActivity(state.lastActivityAt);
+  scheduleSessionLogout();
+}
+
+function recordSessionActivity() {
+  if (!state.authenticated) return;
+  if (checkSessionIdleTimeout()) return;
+  if (Date.now() - state.lastActivityWriteAt < SESSION_ACTIVITY_WRITE_MIN_MS) return;
+  startSessionActivityWindow();
+}
+
+function persistSessionActivity() {
+  if (!state.authenticated || !state.lastActivityAt) return;
+  storeSessionActivity(state.lastActivityAt);
+}
+
+function handleSessionVisibilityChange() {
+  if (!state.authenticated || document.visibilityState !== "visible") return;
+  if (checkSessionIdleTimeout()) return;
+  recordSessionActivity();
+  resumeReminderAlerts();
+}
+
+function handleWindowFocus() {
+  if (!state.authenticated) return;
+  if (checkSessionIdleTimeout()) return;
+  recordSessionActivity();
+  resumeReminderAlerts();
+}
+
+function scheduleSessionLogout() {
+  stopSessionLogoutTimer();
+  if (!state.authenticated || !state.lastActivityAt) return;
+  const remaining = Math.max(0, SESSION_IDLE_TIMEOUT_MS - (Date.now() - state.lastActivityAt));
+  state.sessionLogoutTimer = window.setTimeout(() => {
+    checkSessionIdleTimeout({ keepalive: true });
+  }, remaining);
+}
+
+function stopSessionLogoutTimer() {
+  if (!state.sessionLogoutTimer) return;
+  window.clearTimeout(state.sessionLogoutTimer);
+  state.sessionLogoutTimer = null;
+}
+
+function checkSessionIdleTimeout(options = {}) {
+  if (!state.authenticated) return false;
+  const lastActivity = state.lastActivityAt || storedSessionActivity();
+  if (lastActivity && !sessionIdleExpired(lastActivity)) {
+    scheduleSessionLogout();
+    return false;
+  }
+
+  clearStoredSessionActivity();
+  lockAppView();
+  void clearAuthSession({ keepalive: Boolean(options.keepalive) });
+  return true;
+}
+
+function sessionIdleExpired(activityAt) {
+  return Date.now() - Number(activityAt || 0) >= SESSION_IDLE_TIMEOUT_MS;
+}
+
+function storedSessionActivity() {
+  try {
+    return Number(window.localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function storeSessionActivity(activityAt) {
+  try {
+    window.localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Number(activityAt || Date.now())));
+  } catch {
+    // Session timeout still works for the current tab even if storage is unavailable.
+  }
+}
+
+function clearStoredSessionActivity() {
+  state.lastActivityAt = 0;
+  state.lastActivityWriteAt = 0;
+  try {
+    window.localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
+  } catch {
+    // Best-effort cleanup.
+  }
 }
 
 async function clearAuthSession(options = {}) {
@@ -986,22 +1130,47 @@ function startReminderSchedulerIfEnabled() {
   }
 
   if (reminderAlertsMode() === "push") {
+    if (!remoteReminderAlertsSupported()) {
+      fallbackReminderAlertsToLocal();
+      return;
+    }
     stopReminderScheduler();
     void ensureRemoteReminderSubscription();
     return;
   }
 
+  startLocalReminderScheduler();
+}
+
+function startLocalReminderScheduler() {
   if (!state.reminderTimer) {
     state.reminderTimer = window.setInterval(checkDueReminders, REMINDER_POLL_MS);
   }
-  checkDueReminders();
+  void checkDueReminders();
 }
 
 function enableLocalReminderAlerts() {
   window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "true");
   window.localStorage.setItem(REMINDER_MODE_STORAGE_KEY, "local");
-  startReminderSchedulerIfEnabled();
+  startLocalReminderScheduler();
   updateReminderButton();
+}
+
+function fallbackReminderAlertsToLocal() {
+  if (!reminderAlertsSupported() || Notification.permission !== "granted") return;
+  window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "true");
+  window.localStorage.setItem(REMINDER_MODE_STORAGE_KEY, "local");
+  startLocalReminderScheduler();
+  updateReminderButton();
+}
+
+function resumeReminderAlerts() {
+  if (!reminderAlertsEnabled()) return;
+  if (state.reminderResumeTimer) window.clearTimeout(state.reminderResumeTimer);
+  state.reminderResumeTimer = window.setTimeout(() => {
+    state.reminderResumeTimer = null;
+    startReminderSchedulerIfEnabled();
+  }, 80);
 }
 
 function stopReminderScheduler() {
@@ -1060,24 +1229,45 @@ async function enableRemoteReminderAlerts() {
 }
 
 async function ensureRemoteReminderSubscription() {
-  if (state.remoteReminderSyncing || !remoteReminderAlertsSupported() || Notification.permission !== "granted") return;
+  if (state.remoteReminderSyncing) return;
+  if (!remoteReminderAlertsSupported() || Notification.permission !== "granted") {
+    fallbackReminderAlertsToLocal();
+    return;
+  }
   state.remoteReminderSyncing = true;
 
   try {
+    const config = await api("/api/push");
+    if (!config.configured || !config.vapidPublicKey) {
+      fallbackReminderAlertsToLocal();
+      return;
+    }
+
     const registration = await reminderServiceWorkerRegistration();
-    const subscription = await registration?.pushManager?.getSubscription();
-    if (subscription) {
-      await api("/api/push", {
-        method: "POST",
-        body: {
-          subscription: subscription.toJSON()
-        }
+    if (!registration?.pushManager) {
+      fallbackReminderAlertsToLocal();
+      return;
+    }
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(config.vapidPublicKey)
       });
     }
+
+    await api("/api/push", {
+      method: "POST",
+      body: {
+        subscription: subscription.toJSON()
+      }
+    });
   } catch {
-    // Re-sync is best-effort; the button stays usable for a manual retry.
+    fallbackReminderAlertsToLocal();
   } finally {
     state.remoteReminderSyncing = false;
+    updateReminderButton();
   }
 }
 
@@ -1132,14 +1322,19 @@ async function checkDueReminders() {
 function reminderCandidates(now = new Date()) {
   const today = toDateString(now);
   const dates = [...new Set([today, addDays(today, 1)])];
-  const lowerBound = now.getTime();
-  const upperBound = lowerBound + REMINDER_WINDOW_MS;
+  const nowMs = now.getTime();
+  const lowerBound = nowMs - REMINDER_LATE_GRACE_MS;
+  const upperBound = nowMs + REMINDER_WINDOW_MS;
 
   return dates
     .flatMap((date) => reminderItemsForDate(date))
     .map((item) => reminderFromItem(item))
     .filter(Boolean)
-    .filter((reminder) => reminder.reminderAt >= lowerBound && reminder.reminderAt <= upperBound);
+    .filter((reminder) =>
+      reminder.startsAt > nowMs &&
+      reminder.reminderAt >= lowerBound &&
+      reminder.reminderAt <= upperBound
+    );
 }
 
 function reminderItemsForDate(date) {
@@ -1176,7 +1371,8 @@ function reminderFromItem(item) {
 
 async function showReminderNotification(reminder) {
   const { item } = reminder;
-  const title = `${item.title || "Untitled"} starts in 30 min`;
+  const minutesUntilStart = Math.max(1, Math.round((reminder.startsAt - Date.now()) / 60000));
+  const title = `${item.title || "Untitled"} starts in ${minutesUntilStart} min`;
   const body = [
     displayType(item.type),
     humanDate(item.date),
@@ -2194,12 +2390,37 @@ function storeAuthPhrase(id) {
   }
 }
 
+function storedQuickMemo() {
+  try {
+    return window.localStorage.getItem(QUICK_MEMO_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeQuickMemo(value) {
+  try {
+    const memo = normalizeQuickMemo(value);
+    if (memo) {
+      window.localStorage.setItem(QUICK_MEMO_STORAGE_KEY, memo);
+    } else {
+      window.localStorage.removeItem(QUICK_MEMO_STORAGE_KEY);
+    }
+  } catch {
+    // The memo still updates the current lock screen when storage is unavailable.
+  }
+}
+
 function applyStoredAuthMood() {
   applyAuthMood(storedAuthMood());
 }
 
 function applyStoredAuthPhrase() {
   applyAuthPhrase(storedAuthPhraseId());
+}
+
+function applyStoredQuickMemo() {
+  applyQuickMemo(storedQuickMemo());
 }
 
 function applyAuthPhrase(id) {
@@ -2210,6 +2431,49 @@ function applyAuthPhrase(id) {
 
 function authPhraseById(id) {
   return AUTH_PHRASES.find((phrase) => phrase.id === id) || AUTH_PHRASES[0];
+}
+
+function applyQuickMemo(value) {
+  if (!els.authQuickMemo) return;
+  const memo = normalizeQuickMemo(value);
+  els.authQuickMemo.textContent = memo;
+  els.authQuickMemo.hidden = !memo;
+}
+
+function openQuickMemoDialog() {
+  if (!els.quickMemoDialog || !els.quickMemoInput) return;
+  els.quickMemoInput.value = storedQuickMemo();
+  if (!els.quickMemoDialog.open) els.quickMemoDialog.showModal();
+  window.requestAnimationFrame(() => {
+    els.quickMemoInput.focus();
+    els.quickMemoInput.setSelectionRange(els.quickMemoInput.value.length, els.quickMemoInput.value.length);
+  });
+}
+
+function saveQuickMemo() {
+  const memo = normalizeQuickMemo(els.quickMemoInput?.value || "");
+  storeQuickMemo(memo);
+  applyQuickMemo(memo);
+  if (els.quickMemoDialog.open) els.quickMemoDialog.close();
+  setStatus(memo ? "Quick memo saved." : "Quick memo cleared.");
+}
+
+function clearQuickMemo() {
+  storeQuickMemo("");
+  applyQuickMemo("");
+  if (els.quickMemoInput) els.quickMemoInput.value = "";
+  if (els.quickMemoDialog.open) els.quickMemoDialog.close();
+  setStatus("Quick memo cleared.");
+}
+
+function normalizeQuickMemo(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 120);
 }
 
 function openAuthPhraseDialog() {

@@ -18,6 +18,7 @@
         <div class="auth-bg-layer" aria-hidden="true"></div>
         <div class="auth-paint-layer" aria-hidden="true"></div>
         <div class="auth-unlock-logo" aria-hidden="true"></div>
+        <p id="authQuickMemo" class="auth-quick-memo" hidden></p>
         <form id="loginForm" class="panel">
           <div class="auth-logo" aria-label="Sephia Chord"></div>
           <div class="auth-brand">
@@ -69,7 +70,7 @@
       <section id="appView" hidden>
         <header class="topbar">
           <div class="brand-lockup">
-            <span class="brand-mark" aria-hidden="true"></span>
+            <button id="quickMemoButton" type="button" class="brand-mark brand-mark-button" title="Quick memo" aria-label="Quick memo"></button>
             <div>
               <h1 id="selectedDateLabel">Today</h1>
             </div>
@@ -251,6 +252,26 @@
         </div>
         <p class="auth-phrase-copy">Choose a message for the lock screen.</p>
         <div id="authPhraseContent" class="auth-phrase-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="quickMemoDialog" class="quick-memo-dialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <h2>Quick Memo</h2>
+          <button type="button" id="closeQuickMemoDialogButton" class="icon-button dialog-close-button" title="Close">×</button>
+        </div>
+        <textarea
+          id="quickMemoInput"
+          class="quick-memo-input"
+          rows="3"
+          maxlength="120"
+          placeholder="Leave a note for your lock screen"
+        ></textarea>
+        <div class="quick-memo-actions">
+          <button type="button" class="dialog-text-button" data-action="clear-quick-memo">Clear</button>
+          <button type="button" class="dialog-text-button primary-text" data-action="save-quick-memo">Save</button>
+        </div>
       </div>
     </dialog>
 

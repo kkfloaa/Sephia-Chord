@@ -224,9 +224,9 @@ body.fixed-tab #statusMessage {
 
 .auth-unlock-logo {
   right: max(22px, env(safe-area-inset-right));
-  bottom: calc(48px + env(safe-area-inset-bottom));
+  bottom: calc(34px + env(safe-area-inset-bottom));
   z-index: 2;
-  width: min(56vw, 360px);
+  width: min(44vw, 280px);
   aspect-ratio: 1626 / 839;
   background: url("/assets/sephia-logo-layer.png?v=2") center / contain no-repeat;
   filter: drop-shadow(0 12px 28px rgb(0 0 0 / 34%));
@@ -234,6 +234,14 @@ body.fixed-tab #statusMessage {
   transform: scale(1);
   transform-origin: center;
   will-change: opacity, transform;
+}
+
+@media (max-width: 520px) {
+  .auth-unlock-logo {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(26px + env(safe-area-inset-bottom));
+    width: min(34vw, 154px);
+  }
 }
 
 .auth-unlock-logo::before,
@@ -271,6 +279,29 @@ body.fixed-tab #statusMessage {
 
 .auth-view.is-unlocking .panel {
   animation: auth-panel-exit 500ms linear forwards;
+}
+
+.auth-quick-memo {
+  position: fixed;
+  top: calc(22px + env(safe-area-inset-top));
+  right: max(22px, env(safe-area-inset-right));
+  left: max(22px, env(safe-area-inset-left));
+  z-index: 3;
+  max-width: 520px;
+  margin: 0 auto;
+  color: rgb(255 240 220 / 90%);
+  font-family: "AppleMyungjo", "Noto Serif KR", "Nanum Myeongjo", "Apple SD Gothic Neo", serif;
+  font-size: clamp(17px, 4.8vw, 24px);
+  font-weight: 500;
+  line-height: 1.34;
+  text-align: center;
+  text-shadow: 0 8px 22px rgb(0 0 0 / 42%);
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.auth-quick-memo[hidden] {
+  display: none;
 }
 
 .panel {
@@ -589,6 +620,21 @@ body.fixed-tab #statusMessage {
   border-radius: 7px;
   background: #2b1203 url("/assets/sephia-chord-logo.png") center / cover no-repeat;
   box-shadow: inset 0 0 0 1px rgb(255 238 214 / 8%);
+}
+
+.brand-mark-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0;
+  transition: border-color 140ms ease, box-shadow 140ms ease, filter 140ms ease, transform 140ms ease;
+  touch-action: manipulation;
+}
+
+.brand-mark-button:active {
+  border-color: #c47b3c;
+  box-shadow: inset 0 0 0 1px rgb(255 238 214 / 18%), 0 0 16px rgb(196 123 60 / 24%);
+  filter: brightness(1.12);
+  transform: scale(0.96);
 }
 
 .brand-mark-large {
@@ -2101,7 +2147,8 @@ dialog::backdrop {
 }
 
 .logout-mood-dialog h2,
-.auth-phrase-dialog h2 {
+.auth-phrase-dialog h2,
+.quick-memo-dialog h2 {
   font-size: 18px;
 }
 
@@ -2121,6 +2168,41 @@ dialog::backdrop {
 .auth-phrase-dialog .dialog-body {
   gap: 12px;
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.quick-memo-dialog .dialog-body {
+  gap: 12px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.quick-memo-input {
+  width: 100%;
+  min-height: 104px;
+  resize: none;
+  border: 1px solid #4b392d;
+  border-radius: 8px;
+  background: rgb(12 9 7 / 78%);
+  color: #f7e7d2;
+  font-family: "AppleMyungjo", "Noto Serif KR", "Nanum Myeongjo", "Apple SD Gothic Neo", serif;
+  font-size: 18px;
+  line-height: 1.45;
+  padding: 12px;
+  outline: none;
+}
+
+.quick-memo-input::placeholder {
+  color: rgb(217 187 151 / 48%);
+}
+
+.quick-memo-input:focus {
+  border-color: #9d6331;
+  box-shadow: inset 0 0 0 1px rgb(196 123 60 / 18%), 0 0 18px rgb(196 123 60 / 12%);
+}
+
+.quick-memo-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .auth-phrase-list {
