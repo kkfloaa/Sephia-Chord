@@ -25,6 +25,7 @@ const state = {
   calendarScheduleResize: null,
   calendarScheduleDrag: null,
   calendarScheduleDragFrame: null,
+  suppressCalendarControlClick: false,
   calendarZoom: 1.48,
   calendarZoomGesture: null,
   calendarZoomPulse: false,
@@ -446,6 +447,11 @@ function bindEvents() {
     }
     if (action.dataset.action === "choose-calendar-span-edge") {
       event.stopPropagation();
+      if (state.suppressCalendarControlClick) {
+        event.preventDefault();
+        state.suppressCalendarControlClick = false;
+        return;
+      }
       await adjustCalendarScheduleSpan(id, action.dataset.calendarSpanEdge);
       return;
     }
@@ -1318,6 +1324,7 @@ function renderCalendarScheduleControl() {
         class="calendar-control-grip resize-left"
         data-action="choose-calendar-span-edge"
         data-calendar-span-edge="start"
+        data-calendar-resize-edge="start"
         data-id="${item.id}"
         aria-label="Adjust start date"
       >‹</button>
@@ -1335,6 +1342,7 @@ function renderCalendarScheduleControl() {
         class="calendar-control-grip resize-right"
         data-action="choose-calendar-span-edge"
         data-calendar-span-edge="end"
+        data-calendar-resize-edge="end"
         data-id="${item.id}"
         aria-label="Adjust end date"
       >›</button>
@@ -3959,9 +3967,11 @@ async function deleteCalendarSchedule(id) {
 function suppressCalendarInteractionAfterScheduleGesture() {
   state.suppressCalendarScheduleClick = true;
   state.suppressCalendarClick = true;
+  state.suppressCalendarControlClick = true;
   window.setTimeout(() => {
     state.suppressCalendarScheduleClick = false;
     state.suppressCalendarClick = false;
+    state.suppressCalendarControlClick = false;
   }, 380);
 }
 
@@ -3976,12 +3986,13 @@ function startCalendarScheduleResize(event) {
   if ((!chip && !control) || !item || item.type !== "일정" || !selectedCalendarScheduleMatches(item.id)) return;
 
   const range = selectedDateRange(item.date, item.endDate || item.date);
+  const fromControl = Boolean(control && !chip);
   state.calendarScheduleResize = {
     pointerId: event.pointerId,
     id: item.id,
     edge: handle.dataset.calendarResizeEdge,
     element: chip || control,
-    fromControl: Boolean(control && !chip),
+    fromControl,
     dayWidth: calendarAverageDayWidth(),
     originalStartDate: range.startDate,
     originalEndDate: range.endDate,
@@ -3998,7 +4009,7 @@ function startCalendarScheduleResize(event) {
   } catch {
     // Pointer capture can fail when the browser does not consider the pointer active.
   }
-  event.preventDefault();
+  if (!fromControl) event.preventDefault();
   event.stopPropagation();
 }
 
@@ -4093,8 +4104,6 @@ function startCalendarScheduleDrag(event) {
   } catch {
     // Pointer capture can fail when the browser does not consider the pointer active.
   }
-  event.preventDefault();
-  event.stopPropagation();
 }
 
 function moveCalendarScheduleDrag(event) {

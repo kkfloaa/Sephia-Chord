@@ -1814,7 +1814,7 @@ body.fixed-tab #calendarTab .schedule-calendar {
   color: rgb(241 216 189 / 76%);
   font-size: 24px;
   line-height: 1;
-  touch-action: manipulation;
+  touch-action: none;
 }
 
 .calendar-control-grip.resize-left {
