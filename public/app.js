@@ -951,11 +951,9 @@ async function toggleReminderAlerts() {
     stopReminderScheduler();
     updateReminderButton();
     setStatus("30 min push alerts on.");
-  } catch (error) {
-    window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "false");
-    window.localStorage.removeItem(REMINDER_MODE_STORAGE_KEY);
-    updateReminderButton();
-    setStatus(error.message || "Could not enable push alerts.");
+  } catch {
+    enableLocalReminderAlerts();
+    setStatus("30 min alerts on.");
   }
 }
 
@@ -997,6 +995,13 @@ function startReminderSchedulerIfEnabled() {
     state.reminderTimer = window.setInterval(checkDueReminders, REMINDER_POLL_MS);
   }
   checkDueReminders();
+}
+
+function enableLocalReminderAlerts() {
+  window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "true");
+  window.localStorage.setItem(REMINDER_MODE_STORAGE_KEY, "local");
+  startReminderSchedulerIfEnabled();
+  updateReminderButton();
 }
 
 function stopReminderScheduler() {
