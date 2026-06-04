@@ -9,7 +9,9 @@ const publicDir = path.join(__dirname, "public");
 const apiHandlers = {
   "/api/auth": require("./api/auth"),
   "/api/health": require("./api/health"),
-  "/api/items": require("./api/items")
+  "/api/items": require("./api/items"),
+  "/api/push": require("./api/push"),
+  "/api/reminder-cron": require("./api/reminder-cron")
 };
 
 const server = http.createServer(async (req, res) => {

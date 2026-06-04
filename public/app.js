@@ -26,6 +26,9 @@ const state = {
   calendarScheduleDrag: null,
   calendarScheduleDragFrame: null,
   suppressCalendarControlClick: false,
+  reminderTimer: null,
+  reminderServiceWorkerReady: null,
+  remoteReminderSyncing: false,
   calendarZoom: 1.48,
   calendarZoomGesture: null,
   calendarZoomPulse: false,
@@ -50,6 +53,7 @@ const state = {
   pickerOutsideClickTimer: null,
   emotionSaving: false,
   challengeSaving: false,
+  skipCleanupInFlight: false,
   pinSubmitting: false
 };
 
@@ -85,6 +89,12 @@ const AUTH_PHRASE_STORAGE_KEY = "sephia-chord.authPhrase";
 const ITEM_CACHE_STORAGE_KEY = "sephia-chord.itemsCache.v1";
 const ITEM_CACHE_MAX_RANGES = 6;
 const ITEM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const REMINDER_ENABLED_STORAGE_KEY = "sephia-chord.reminders.enabled";
+const REMINDER_MODE_STORAGE_KEY = "sephia-chord.reminders.mode";
+const REMINDER_SENT_STORAGE_KEY = "sephia-chord.reminders.sent.v1";
+const REMINDER_LEAD_MINUTES = 30;
+const REMINDER_POLL_MS = 30 * 1000;
+const REMINDER_WINDOW_MS = 75 * 1000;
 const AUTH_PHRASES = [
   { id: "chord", text: "Keep your chord" },
   { id: "rhythm", text: "Move in your rhythm" },
@@ -279,6 +289,7 @@ const els = {
   logoutMoodContent: document.querySelector("#logoutMoodContent"),
   logoutMoodDialog: document.querySelector("#logoutMoodDialog"),
   noteInput: document.querySelector("#noteInput"),
+  notificationButton: document.querySelector("#notificationButton"),
   passwordInput: document.querySelector("#passwordInput"),
   phraseButton: document.querySelector("#phraseButton"),
   pickerPanel: document.querySelector("#pickerPanel"),
@@ -303,6 +314,8 @@ async function init() {
   applyStoredAuthMood();
   applyStoredAuthPhrase();
   bindEvents();
+  registerReminderServiceWorker();
+  updateReminderButton();
   await requireLoginOnEntry();
 }
 
@@ -316,6 +329,7 @@ function bindEvents() {
   bindDialogButtonFeedback();
   document.querySelector("#logoutButton").addEventListener("click", logout);
   document.querySelector("#refreshButton").addEventListener("click", loadItems);
+  els.notificationButton.addEventListener("click", toggleReminderAlerts);
   els.phraseButton.addEventListener("click", openAuthPhraseDialog);
   els.closeCalendarTimelineDialogButton.addEventListener("click", () => els.calendarTimelineDialog.close());
   els.closeDialogButton.addEventListener("click", cancelItemDialog);
@@ -463,13 +477,13 @@ function bindEvents() {
       event.stopPropagation();
       await toggleRoutine(id);
     }
-    if (action.dataset.action === "skip-fixed-schedule") {
+    if (action.dataset.action === "skip-fixed-schedule" || action.dataset.action === "skip-recurring-item") {
       event.stopPropagation();
-      await skipFixedSchedule(id, action.dataset.date || state.selectedDate);
+      await skipRecurringItem(id, action.dataset.date || state.selectedDate);
     }
-    if (action.dataset.action === "return-fixed-schedule") {
+    if (action.dataset.action === "return-fixed-schedule" || action.dataset.action === "return-skipped-recurring") {
       event.stopPropagation();
-      await returnFixedSchedule(id);
+      await returnSkippedRecurringItem(id);
     }
     if (action.dataset.action === "set-emotion") {
       event.stopPropagation();
@@ -560,7 +574,7 @@ function bindEvents() {
     }
 
     const card = event.target.closest(".timeline-item");
-    if (card && !event.target.closest(".checkbox, .fixed-skip-button, .edit-button") && canSelectTimelineItem(findItem(card.dataset.timelineId))) {
+    if (card && !event.target.closest(".checkbox, .fixed-skip-button, .skip-button, .edit-button") && canSelectTimelineItem(findItem(card.dataset.timelineId))) {
       event.preventDefault();
       event.stopPropagation();
       await deleteTimelineItem(card.dataset.timelineId);
@@ -614,6 +628,7 @@ function bindEvents() {
   document.body.addEventListener("pointermove", moveCalendarMonthSwipe);
   document.body.addEventListener("pointerup", finishCalendarMonthSwipe);
   document.body.addEventListener("pointercancel", cancelCalendarMonthSwipe);
+  document.body.addEventListener("pointerdown", handleSkipButtonPress);
   document.body.addEventListener("pointerdown", clearTimelineItemOnOutsidePointer);
   document.body.addEventListener("pointerdown", clearCalendarDateOnOutsidePointer);
   document.addEventListener("scroll", clearTimelineItemOnScroll, true);
@@ -660,6 +675,16 @@ function setButtonPressed(button, pressed, delay = 0) {
   }
 
   removePressed();
+}
+
+function handleSkipButtonPress(event) {
+  const button = event.target.closest(".skip-button");
+  if (!button) return;
+
+  setButtonPressed(button, true);
+  button.addEventListener("pointerup", () => setButtonPressed(button, false, 120), { once: true });
+  button.addEventListener("pointercancel", () => setButtonPressed(button, false), { once: true });
+  button.addEventListener("pointerleave", () => setButtonPressed(button, false), { once: true });
 }
 
 async function checkAuth() {
@@ -884,6 +909,320 @@ function pulseAuthScreenGlitch() {
   els.authView.classList.add("is-glitching");
 }
 
+function registerReminderServiceWorker() {
+  if (!("serviceWorker" in navigator)) return null;
+  if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return null;
+
+  state.reminderServiceWorkerReady = navigator.serviceWorker
+    .register("/sw.js")
+    .then(() => navigator.serviceWorker.ready)
+    .catch(() => null);
+  return state.reminderServiceWorkerReady;
+}
+
+async function toggleReminderAlerts() {
+  if (!reminderAlertsSupported()) {
+    setStatus("Notifications are not supported on this browser.");
+    return;
+  }
+
+  if (reminderAlertsEnabled()) {
+    await disableRemoteReminderAlerts();
+    window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "false");
+    window.localStorage.removeItem(REMINDER_MODE_STORAGE_KEY);
+    stopReminderScheduler();
+    updateReminderButton();
+    setStatus("30 min alerts off.");
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "false");
+    updateReminderButton();
+    setStatus(permission === "denied" ? "Notifications are blocked in browser settings." : "Notifications not enabled.");
+    return;
+  }
+
+  try {
+    await enableRemoteReminderAlerts();
+    window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "true");
+    window.localStorage.setItem(REMINDER_MODE_STORAGE_KEY, "push");
+    stopReminderScheduler();
+    updateReminderButton();
+    setStatus("30 min push alerts on.");
+  } catch (error) {
+    window.localStorage.setItem(REMINDER_ENABLED_STORAGE_KEY, "false");
+    window.localStorage.removeItem(REMINDER_MODE_STORAGE_KEY);
+    updateReminderButton();
+    setStatus(error.message || "Could not enable push alerts.");
+  }
+}
+
+function reminderAlertsSupported() {
+  return "Notification" in window;
+}
+
+function remoteReminderAlertsSupported() {
+  return reminderAlertsSupported() &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    (window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1");
+}
+
+function reminderAlertsEnabled() {
+  return reminderAlertsSupported() &&
+    Notification.permission === "granted" &&
+    window.localStorage.getItem(REMINDER_ENABLED_STORAGE_KEY) === "true";
+}
+
+function reminderAlertsMode() {
+  return window.localStorage.getItem(REMINDER_MODE_STORAGE_KEY) || "local";
+}
+
+function startReminderSchedulerIfEnabled() {
+  updateReminderButton();
+  if (!reminderAlertsEnabled()) {
+    stopReminderScheduler();
+    return;
+  }
+
+  if (reminderAlertsMode() === "push") {
+    stopReminderScheduler();
+    void ensureRemoteReminderSubscription();
+    return;
+  }
+
+  if (!state.reminderTimer) {
+    state.reminderTimer = window.setInterval(checkDueReminders, REMINDER_POLL_MS);
+  }
+  checkDueReminders();
+}
+
+function stopReminderScheduler() {
+  if (!state.reminderTimer) return;
+  window.clearInterval(state.reminderTimer);
+  state.reminderTimer = null;
+}
+
+function updateReminderButton() {
+  if (!els.notificationButton) return;
+  const supported = reminderAlertsSupported();
+  const enabled = supported && reminderAlertsEnabled();
+  const denied = supported && Notification.permission === "denied";
+  const pushMode = enabled && reminderAlertsMode() === "push";
+  els.notificationButton.classList.toggle("alerts-on", enabled);
+  els.notificationButton.classList.toggle("alerts-blocked", denied);
+  els.notificationButton.disabled = !supported;
+  els.notificationButton.setAttribute("aria-pressed", String(enabled));
+  els.notificationButton.title = !supported
+    ? "Alerts unavailable"
+    : denied
+      ? "Alerts blocked"
+      : enabled
+        ? (pushMode ? "30 min push alerts on" : "30 min alerts on")
+        : "30 min alerts off";
+}
+
+async function enableRemoteReminderAlerts() {
+  if (!remoteReminderAlertsSupported()) {
+    throw new Error("Background push is not supported here. Install the app to the home screen if you are on iPhone.");
+  }
+
+  const config = await api("/api/push");
+  if (!config.configured || !config.vapidPublicKey) {
+    throw new Error("Server push is not configured.");
+  }
+
+  const registration = await reminderServiceWorkerRegistration();
+  if (!registration?.pushManager) {
+    throw new Error("Push manager is not available.");
+  }
+
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) await existing.unsubscribe();
+
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: base64UrlToUint8Array(config.vapidPublicKey)
+  });
+  await api("/api/push", {
+    method: "POST",
+    body: {
+      subscription: subscription.toJSON()
+    }
+  });
+}
+
+async function ensureRemoteReminderSubscription() {
+  if (state.remoteReminderSyncing || !remoteReminderAlertsSupported() || Notification.permission !== "granted") return;
+  state.remoteReminderSyncing = true;
+
+  try {
+    const registration = await reminderServiceWorkerRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) {
+      await api("/api/push", {
+        method: "POST",
+        body: {
+          subscription: subscription.toJSON()
+        }
+      });
+    }
+  } catch {
+    // Re-sync is best-effort; the button stays usable for a manual retry.
+  } finally {
+    state.remoteReminderSyncing = false;
+  }
+}
+
+async function disableRemoteReminderAlerts() {
+  if (!("serviceWorker" in navigator)) return;
+
+  try {
+    const registration = await reminderServiceWorkerRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (!subscription) return;
+    await api("/api/push", {
+      method: "DELETE",
+      body: {
+        endpoint: subscription.endpoint
+      }
+    });
+    await subscription.unsubscribe();
+  } catch {
+    // Turning off local state should still work even if server cleanup fails.
+  }
+}
+
+function base64UrlToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replaceAll("-", "+").replaceAll("_", "/");
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+}
+
+async function checkDueReminders() {
+  if (reminderAlertsMode() === "push") return;
+  if (!reminderAlertsEnabled() || !state.items.length) return;
+
+  const now = new Date();
+  const sent = readSentReminders();
+  const reminders = reminderCandidates(now);
+
+  for (const reminder of reminders) {
+    if (sent[reminder.key]) continue;
+    sent[reminder.key] = Date.now();
+    writeSentReminders(sent);
+
+    try {
+      await showReminderNotification(reminder);
+    } catch {
+      delete sent[reminder.key];
+      writeSentReminders(sent);
+    }
+  }
+}
+
+function reminderCandidates(now = new Date()) {
+  const today = toDateString(now);
+  const dates = [...new Set([today, addDays(today, 1)])];
+  const lowerBound = now.getTime();
+  const upperBound = lowerBound + REMINDER_WINDOW_MS;
+
+  return dates
+    .flatMap((date) => reminderItemsForDate(date))
+    .map((item) => reminderFromItem(item))
+    .filter(Boolean)
+    .filter((reminder) => reminder.reminderAt >= lowerBound && reminder.reminderAt <= upperBound);
+}
+
+function reminderItemsForDate(date) {
+  const datedItems = state.items
+    .filter((item) =>
+      (item.type === "일정" || item.type === "할일") &&
+      item.date === date
+    );
+
+  return [
+    ...datedItems,
+    ...activeFixedSchedules(date).map((item) => fixedScheduleTimelineItem(item, date)),
+    ...activeRoutines(date).map((item) => ({ ...item, date }))
+  ];
+}
+
+function reminderFromItem(item) {
+  if (!item || !isTimedItemType(item.type) || !isTimeString(item.startTime)) return null;
+  if (item.startTime === FULL_DAY_START_TIME && item.endTime === FULL_DAY_END_TIME) return null;
+  if (item.completed || item.status === "완료" || item.status === "취소") return null;
+  if (item.type === "루틴" && routineRecord(item.id, item.date)?.completed) return null;
+
+  const startsAt = new Date(`${item.date}T${item.startTime}:00`).getTime();
+  if (!Number.isFinite(startsAt)) return null;
+  const reminderAt = startsAt - REMINDER_LEAD_MINUTES * 60 * 1000;
+
+  return {
+    key: `${item.date}|${item.id}|${item.startTime}|${REMINDER_LEAD_MINUTES}`,
+    item,
+    startsAt,
+    reminderAt
+  };
+}
+
+async function showReminderNotification(reminder) {
+  const { item } = reminder;
+  const title = `${item.title || "Untitled"} starts in 30 min`;
+  const body = [
+    displayType(item.type),
+    humanDate(item.date),
+    formatKoreanTime(item.startTime)
+  ].filter(Boolean).join(" · ");
+  const options = {
+    body,
+    tag: `sephia-reminder-${reminder.key}`,
+    renotify: false,
+    icon: "/assets/sephia-chord-logo.png",
+    badge: "/assets/sephia-chord-logo.png",
+    data: {
+      id: item.id,
+      date: item.date
+    }
+  };
+  const registration = await reminderServiceWorkerRegistration();
+  if (registration?.showNotification) {
+    await registration.showNotification(title, options);
+    return;
+  }
+  new Notification(title, options);
+}
+
+async function reminderServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator)) return null;
+  if (!state.reminderServiceWorkerReady) registerReminderServiceWorker();
+  return state.reminderServiceWorkerReady || null;
+}
+
+function readSentReminders() {
+  try {
+    const sent = JSON.parse(window.localStorage.getItem(REMINDER_SENT_STORAGE_KEY) || "{}");
+    const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    Object.keys(sent).forEach((key) => {
+      if (Number(sent[key] || 0) < cutoff) delete sent[key];
+    });
+    return sent;
+  } catch {
+    return {};
+  }
+}
+
+function writeSentReminders(sent) {
+  try {
+    window.localStorage.setItem(REMINDER_SENT_STORAGE_KEY, JSON.stringify(sent));
+  } catch {
+    // Reminder dedupe is best-effort.
+  }
+}
+
 function handlePinKeydown(event) {
   if (els.authView.hidden) return;
   if (/^\d$/.test(event.key)) {
@@ -903,6 +1242,7 @@ function handlePinKeydown(event) {
 async function loadItems() {
   const range = queryRange();
   const cacheUsed = hydrateItemsFromCache(range);
+  if (cacheUsed) startReminderSchedulerIfEnabled();
   setStatus(cacheUsed ? "Syncing..." : "Loading...");
   state.loading = true;
   const { start, end } = range;
@@ -911,11 +1251,15 @@ async function loadItems() {
     const payload = await api(`/api/items?start=${start}&end=${end}`);
     setItems(payload.items || []);
     writeItemsCache(range, state.items);
+    startReminderSchedulerIfEnabled();
     setStatus("");
+    void cleanupExpiredSkippedRecords();
   } catch (error) {
     if (!cacheUsed) {
       state.items = [];
       render();
+    } else {
+      startReminderSchedulerIfEnabled();
     }
     setStatus(error.message || "Could not load Notion data.");
   } finally {
@@ -1045,6 +1389,7 @@ function renderTabs() {
     routines: els.routinesTab
   }[state.tab];
   activeView.hidden = false;
+  updateReminderButton();
   updateFixedTabMetrics({ immediate: true });
 }
 
@@ -1143,8 +1488,8 @@ function renderSchedulePill(block, context) {
   const check = item.type === "할일" || item.type === "루틴"
     ? `<button type="button" class="checkbox" data-action="${item.type === "루틴" ? "toggle-routine" : "toggle-task"}" data-id="${item.id}">${done ? '<span class="checkmark">✓</span>' : ""}</button>`
     : `<span class="tag">${escapeHtml(displayType(item.type))}</span>`;
-  const fixedSkipButton = item.type === "고정일정"
-    ? `<button type="button" class="fixed-skip-button" data-action="skip-fixed-schedule" data-id="${item.id}" data-date="${item.date || state.selectedDate}">SKIP</button>`
+  const skipButton = isSkippableRecurringItem(item)
+    ? `<button type="button" class="fixed-skip-button skip-button" data-action="skip-recurring-item" data-id="${item.id}" data-date="${item.date || state.selectedDate}">SKIP</button>`
     : "";
   const cardAction = selectable ? "select-timeline-item" : "edit";
   const typeClass = timelineTypeClass(item.type);
@@ -1164,7 +1509,7 @@ function renderSchedulePill(block, context) {
         <span class="item-title">${escapeHtml(item.title)}</span>
         <span class="item-meta">${timelineItemTimeMeta(item)}</span>
       </button>
-      ${fixedSkipButton}
+      ${skipButton}
       <button type="button" class="edit-button" data-action="edit" data-id="${item.id}">›</button>
       ${selectable ? `
         <span class="timeline-resize-handle resize-start" data-resize-edge="start" aria-hidden="true"></span>
@@ -2297,7 +2642,7 @@ function renderEmotionCalendarDay(day) {
 
 function renderRoutines() {
   const routines = state.items.filter((item) => item.type === "루틴").sort(byTitle);
-  const skippedFixed = skippedFixedSchedules();
+  const skippedItems = skippedRecurringItems();
 
   els.routinesTab.innerHTML = `
     <section class="section">
@@ -2305,7 +2650,7 @@ function renderRoutines() {
         <h2>Routine</h2>
       </div>
       ${renderRoutineList(routines, true)}
-      ${renderSkippedFixedSchedules(skippedFixed)}
+      ${renderSkippedRecurringItems(skippedItems)}
     </section>
   `;
 }
@@ -2359,23 +2704,23 @@ function renderRoutineList(routines, showAll) {
   `;
 }
 
-function renderSkippedFixedSchedules(entries) {
+function renderSkippedRecurringItems(entries) {
   if (!entries.length) return "";
 
   return `
     <div class="skipped-fixed-panel">
       <div class="skipped-fixed-header">
-        <h3>Skipped Fixed</h3>
+        <h3>Skipped</h3>
       </div>
       <div class="skipped-fixed-list">
         ${entries.map(({ record, schedule }) => `
           <div class="item skipped-fixed-card">
-            <span class="tag">Fixed</span>
+            <span class="tag">${escapeHtml(displayType(schedule.type))}</span>
             <div class="item-main">
               <span class="item-title">${escapeHtml(schedule.title || record.title || "Untitled")}</span>
-              <span class="item-meta">${escapeHtml(skippedFixedMeta(record, schedule))}</span>
+              <span class="item-meta">${escapeHtml(skippedRecurringMeta(record, schedule))}</span>
             </div>
-            <button type="button" class="return-button" data-action="return-fixed-schedule" data-id="${record.id}">Return</button>
+            <button type="button" class="return-button" data-action="return-skipped-recurring" data-id="${record.id}">Return</button>
           </div>
         `).join("")}
       </div>
@@ -2383,7 +2728,7 @@ function renderSkippedFixedSchedules(entries) {
   `;
 }
 
-function skippedFixedMeta(record, schedule) {
+function skippedRecurringMeta(record, schedule) {
   const parts = [
     record.date ? humanDate(record.date) : "",
     routineTimeLabel(schedule)
@@ -3400,9 +3745,9 @@ async function toggleRoutine(id) {
   }
 }
 
-async function skipFixedSchedule(id, date = state.selectedDate) {
+async function skipRecurringItem(id, date = state.selectedDate) {
   const schedule = findItem(id);
-  if (!schedule || schedule.type !== "고정일정" || !isDateString(date)) return;
+  if (!isSkippableRecurringItem(schedule) || !isDateString(date)) return;
 
   const existing = routineRecord(id, date);
   state.selectedTimelineItem = null;
@@ -3425,11 +3770,11 @@ async function skipFixedSchedule(id, date = state.selectedDate) {
       });
     }
   } catch (error) {
-    setStatus(error.message || "Could not skip the fixed schedule.");
+    setStatus(error.message || "Could not skip this item.");
   }
 }
 
-async function returnFixedSchedule(recordId) {
+async function returnSkippedRecurringItem(recordId) {
   const record = findItem(recordId);
   if (!record || record.type !== "루틴기록" || record.status !== "취소") return;
 
@@ -3437,7 +3782,23 @@ async function returnFixedSchedule(recordId) {
     await deleteItemFast(record.id);
     setStatus("Returned.");
   } catch (error) {
-    setStatus(error.message || "Could not return the fixed schedule.");
+    setStatus(error.message || "Could not return this item.");
+  }
+}
+
+async function cleanupExpiredSkippedRecords() {
+  if (state.skipCleanupInFlight) return;
+  const records = expiredSkippedRecurringRecords();
+  if (!records.length) return;
+
+  state.skipCleanupInFlight = true;
+  try {
+    await Promise.all(records.map((record) => deleteItemFast(record.id, { renderAfter: false })));
+    renderActiveView();
+  } catch {
+    writeActiveItemsCache();
+  } finally {
+    state.skipCleanupInFlight = false;
   }
 }
 
@@ -3709,7 +4070,7 @@ function cancelTimelineItemResize() {
 
 function startTimelineItemDrag(event) {
   const card = event.target.closest(".timeline-item");
-  if (!card || event.target.closest(".checkbox, .fixed-skip-button, .edit-button, .timeline-resize-handle, input, textarea, select")) return;
+  if (!card || event.target.closest(".checkbox, .fixed-skip-button, .skip-button, .edit-button, .timeline-resize-handle, input, textarea, select")) return;
 
   const timeline = card.closest(".timeline");
   if (!timeline) return;
@@ -5311,14 +5672,18 @@ function isItemOnDate(item, date) {
 }
 
 function activeRoutines(date) {
-  return state.items.filter((item) => item.type === "루틴" && isRoutineActive(item, date));
+  return state.items.filter((item) =>
+    item.type === "루틴" &&
+    isRoutineActive(item, date) &&
+    !recurringItemSkipped(item.id, date)
+  );
 }
 
 function activeFixedSchedules(date) {
   return state.items.filter((item) =>
     item.type === "고정일정" &&
     isRoutineActive(item, date) &&
-    !fixedScheduleSkipped(item.id, date)
+    !recurringItemSkipped(item.id, date)
   );
 }
 
@@ -5343,23 +5708,38 @@ function routineRecord(routineId, date) {
   return state.items.find((item) => item.type === "루틴기록" && item.sourceRoutineId === routineId && item.date === date);
 }
 
-function fixedScheduleSkipped(scheduleId, date) {
-  return routineRecord(scheduleId, date)?.status === "취소";
+function isSkippableRecurringItem(item) {
+  return item && (item.type === "루틴" || item.type === "고정일정");
 }
 
-function skippedFixedSchedules() {
+function recurringItemSkipped(itemId, date) {
+  return routineRecord(itemId, date)?.status === "취소";
+}
+
+function skippedRecurringItems() {
   return state.items
     .filter((item) => item.type === "루틴기록" && item.status === "취소" && item.sourceRoutineId)
     .map((record) => ({
       record,
       schedule: findItem(record.sourceRoutineId)
     }))
-    .filter(({ schedule }) => schedule && schedule.type === "고정일정")
+    .filter(({ schedule }) => isSkippableRecurringItem(schedule))
     .sort((left, right) =>
       String(right.record.date || "").localeCompare(String(left.record.date || "")) ||
       byStartTime(left.schedule, right.schedule) ||
       byTitle(left.schedule, right.schedule)
     );
+}
+
+function expiredSkippedRecurringRecords(date = todayString()) {
+  return state.items.filter((item) =>
+    item.type === "루틴기록" &&
+    item.status === "취소" &&
+    item.sourceRoutineId &&
+    item.date &&
+    item.date < date &&
+    isSkippableRecurringItem(findItem(item.sourceRoutineId))
+  );
 }
 
 function emotionRecord(date) {
